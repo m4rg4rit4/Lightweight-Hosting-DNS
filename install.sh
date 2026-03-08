@@ -38,8 +38,6 @@ if [ -f "$CONFIG_FILE" ]; then
     # Intentar recuperar constantes específicas si ya existen
     DNS_HOSTNAME=$(grep "'DNS_HOSTNAME'" "$CONFIG_FILE" | cut -d"'" -f4)
     DNS_DOMAIN=$(grep "'DNS_DOMAIN'" "$CONFIG_FILE" | cut -d"'" -f4)
-    DNS_ADMIN_EMAIL=$(grep "'DNS_ADMIN_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
-    LETSENCRYPT_EMAIL=$(grep "'LETSENCRYPT_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
     HAS_LWH=true
 else
     printf "${YELLOW}Lightweight-Hosting no detectado. Preparando entorno...${NC}\n"
@@ -50,33 +48,29 @@ else
     ADMIN_EMAIL=""
 fi
 
-# Si faltan datos críticos (DNS_HOSTNAME o DNS_DOMAIN), preguntar siempre
-if [ -z "$DNS_HOSTNAME" ] || [ -z "$DNS_DOMAIN" ]; then
-    # Detectar sugerencias
-    DETECTED_HOSTNAME=$(hostname -s)
-    DETECTED_DOMAIN=$(hostname -d)
-    [ -z "$DETECTED_DOMAIN" ] && DETECTED_DOMAIN="tu-dominio.com"
+# Preparar sugerencias inteligentes para los prompts (siempre preguntar)
+SUGGESTED_HOSTNAME=${DNS_HOSTNAME:-$(hostname -s)}
+SUGGESTED_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
+[ -z "$SUGGESTED_DOMAIN" ] && SUGGESTED_DOMAIN="tu-dominio.com"
 
-    printf "${YELLOW}Configuración de Identidad del Servidor DNS:${NC}\n"
-    read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$DETECTED_HOSTNAME]: " INPUT_HOSTNAME
-    DNS_HOSTNAME=${INPUT_HOSTNAME:-$DETECTED_HOSTNAME}
+printf "${YELLOW}Configuración de Identidad del Servidor DNS:${NC}\n"
+read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$SUGGESTED_HOSTNAME]: " INPUT_HOSTNAME
+DNS_HOSTNAME=${INPUT_HOSTNAME:-$SUGGESTED_HOSTNAME}
 
-    read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$DETECTED_DOMAIN]: " INPUT_DOMAIN
-    DNS_DOMAIN=${INPUT_DOMAIN:-$DETECTED_DOMAIN}
-    
-    FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
-    printf "${GREEN}FQDN configurado como: $FULL_FQDN${NC}\n"
-fi
+read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMAIN]: " INPUT_DOMAIN
+DNS_DOMAIN=${INPUT_DOMAIN:-$SUGGESTED_DOMAIN}
 
-# Fallbacks finales para emails si no se han recuperado de config.php
-if [ -z "$ADMIN_EMAIL" ]; then
-    DEFAULT_EMAIL="admin@$DNS_DOMAIN"
-    read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL
-    ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
-fi
+FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
+printf "${GREEN}FQDN configurado como: $FULL_FQDN${NC}\n"
 
-DNS_ADMIN_EMAIL=${DNS_ADMIN_EMAIL:-$ADMIN_EMAIL}
-LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-$ADMIN_EMAIL}
+# Configuración de Email (siempre preguntar)
+DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$DNS_DOMAIN"}
+read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL
+ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
+
+# Sincronizar constantes de email
+DNS_ADMIN_EMAIL=$ADMIN_EMAIL
+LETSENCRYPT_EMAIL=$ADMIN_EMAIL
 
 # 3. Instalación de paquetes y optimización de recursos (Target: 1GB RAM)
 printf "${YELLOW}Verificando dependencias del sistema y optimizando recursos...${NC}\n"
