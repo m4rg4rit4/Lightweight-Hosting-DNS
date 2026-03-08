@@ -11,7 +11,7 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.5)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.6)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -203,6 +203,7 @@ define('DNS_HOSTNAME', '$DNS_HOSTNAME');
 define('DNS_DOMAIN', '$DNS_DOMAIN');
 define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
 define('LETSENCRYPT_EMAIL', '$LETSENCRYPT_EMAIL');
+define('DNS_INSTALLED', true);
 
 function getPDO() {
     static \$pdo;
@@ -245,6 +246,7 @@ if [ "$HAS_LWH" = true ]; then
     update_php_const "DNS_DOMAIN" "$DNS_DOMAIN"
     update_php_const "DNS_ADMIN_EMAIL" "$DNS_ADMIN_EMAIL"
     update_php_const "LETSENCRYPT_EMAIL" "$LETSENCRYPT_EMAIL"
+    update_php_const "DNS_INSTALLED" "true"
 fi
 
 # 3.2 Optimización Web (Apache2 + PHP-FPM)
@@ -284,9 +286,9 @@ EOF
     systemctl restart apache2
 fi
 
-# 3.3 Configurar VirtualHost si es Stand-alone (No hay Lightweight-Hosting)
-if [ "$HAS_LWH" = false ]; then
-    printf "${YELLOW}Configurando Apache en Puerto 8080 para DNS API (Stand-alone)...${NC}\n"
+# 3.3 Configurar VirtualHost para DNS API (Puerto 8080)
+if [ ! -f /etc/apache2/sites-available/dns-api.conf ]; then
+    printf "${YELLOW}Configurando Apache en Puerto 8080 para DNS API...${NC}\n"
     
     # Asegurar que Apache escucha en el puerto 8080
     if ! grep -q "Listen 8080" /etc/apache2/ports.conf; then
