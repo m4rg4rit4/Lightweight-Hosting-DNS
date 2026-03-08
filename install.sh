@@ -40,13 +40,6 @@ if [ -f "$CONFIG_FILE" ]; then
     DNS_DOMAIN=$(grep "'DNS_DOMAIN'" "$CONFIG_FILE" | cut -d"'" -f4)
     DNS_ADMIN_EMAIL=$(grep "'DNS_ADMIN_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
     LETSENCRYPT_EMAIL=$(grep "'LETSENCRYPT_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
-
-    # Fallbacks si son nuevas
-    DNS_HOSTNAME=${DNS_HOSTNAME:-$(hostname -s)}
-    DNS_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
-    DNS_ADMIN_EMAIL=${DNS_ADMIN_EMAIL:-$ADMIN_EMAIL}
-    LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-$ADMIN_EMAIL}
-    
     HAS_LWH=true
 else
     printf "${YELLOW}Lightweight-Hosting no detectado. Preparando entorno...${NC}\n"
@@ -54,8 +47,12 @@ else
     DB_USER="dbadmin"
     DB_NAME="dbadmin"
     DB_PASS=$(openssl rand -base64 18)
-    
-    # Preguntar datos de forma explícita
+    ADMIN_EMAIL=""
+fi
+
+# Si faltan datos críticos (DNS_HOSTNAME o DNS_DOMAIN), preguntar siempre
+if [ -z "$DNS_HOSTNAME" ] || [ -z "$DNS_DOMAIN" ]; then
+    # Detectar sugerencias
     DETECTED_HOSTNAME=$(hostname -s)
     DETECTED_DOMAIN=$(hostname -d)
     [ -z "$DETECTED_DOMAIN" ] && DETECTED_DOMAIN="tu-dominio.com"
@@ -69,14 +66,17 @@ else
     
     FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
     printf "${GREEN}FQDN configurado como: $FULL_FQDN${NC}\n"
-
-    DEFAULT_EMAIL="admin@$DNS_DOMAIN"
-    read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " ADMIN_EMAIL
-    ADMIN_EMAIL=${ADMIN_EMAIL:-$DEFAULT_EMAIL}
-    
-    DNS_ADMIN_EMAIL=$ADMIN_EMAIL
-    LETSENCRYPT_EMAIL=$ADMIN_EMAIL
 fi
+
+# Fallbacks finales para emails si no se han recuperado de config.php
+if [ -z "$ADMIN_EMAIL" ]; then
+    DEFAULT_EMAIL="admin@$DNS_DOMAIN"
+    read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL
+    ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
+fi
+
+DNS_ADMIN_EMAIL=${DNS_ADMIN_EMAIL:-$ADMIN_EMAIL}
+LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-$ADMIN_EMAIL}
 
 # 3. Instalación de paquetes y optimización de recursos (Target: 1GB RAM)
 printf "${YELLOW}Verificando dependencias del sistema y optimizando recursos...${NC}\n"
