@@ -13,15 +13,28 @@ NC='\033[0m'
 
 printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.5)...${NC}\n"
 
-# Asegurar interactividad si se ejecuta vía pipe (curl | bash)
-if [ ! -t 0 ]; then
-  exec 0</dev/tty
-fi
-
 # Función de limpieza de variables
 sanitize_var() {
     # Eliminar espacios, saltos de línea y limpiar restos de comentarios shell/php
     echo "$1" | tr -d '[:space:]\r\n' | sed -E 's|^//.*||; s|^#.*||'
+}
+
+# Función para prompts interactivos (compatible con curl | bash)
+ask_input() {
+    local prompt=$1
+    local default=$2
+    local var_name=$3
+    local val=""
+    
+    # Si estamos en un pipe, forzamos lectura de /dev/tty para no consumir el script
+    if [ ! -t 0 ]; then
+        read -p "$prompt" val < /dev/tty
+    else
+        read -p "$prompt" val
+    fi
+    
+    val=${val:-$default}
+    eval "$var_name=\"$val\""
 }
 
 # Función para extraer constantes de PHP de forma robusta
@@ -96,12 +109,10 @@ SUGGESTED_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
 [ -z "$SUGGESTED_DOMAIN" ] || [ "$SUGGESTED_DOMAIN" = "." ] && SUGGESTED_DOMAIN="tu-dominio.com"
 
 printf "${YELLOW}Configuración de Identidad del Servidor DNS:${NC}\n"
-read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$SUGGESTED_HOSTNAME]: " INPUT_HOSTNAME
-DNS_HOSTNAME=${INPUT_HOSTNAME:-$SUGGESTED_HOSTNAME}
+ask_input "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$SUGGESTED_HOSTNAME]: " "$SUGGESTED_HOSTNAME" "DNS_HOSTNAME"
 DNS_HOSTNAME=$(sanitize_var "$DNS_HOSTNAME")
 
-read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMAIN]: " INPUT_DOMAIN
-DNS_DOMAIN=${INPUT_DOMAIN:-$SUGGESTED_DOMAIN}
+ask_input "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMAIN]: " "$SUGGESTED_DOMAIN" "DNS_DOMAIN"
 DNS_DOMAIN=$(sanitize_var "$DNS_DOMAIN" | sed 's/^\.//')
 
 FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
@@ -118,8 +129,7 @@ fi
 
 # Configuración de Email (siempre preguntar)
 DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$DNS_DOMAIN"}
-read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL
-ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
+ask_input "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " "$DEFAULT_EMAIL" "ADMIN_EMAIL"
 ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
 
 # Sincronizar constantes de email
