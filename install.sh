@@ -284,6 +284,46 @@ EOF
     systemctl restart apache2
 fi
 
+# 3.3 Configurar VirtualHost si es Stand-alone (No hay Lightweight-Hosting)
+if [ "$HAS_LWH" = false ]; then
+    printf "${YELLOW}Configurando VirtualHost para DNS API (Stand-alone)...${NC}\n"
+    
+    # Detección del socket de PHP
+    REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
+    
+    cat <<EOF > /etc/apache2/sites-available/dns-api.conf
+<VirtualHost *:80>
+    ServerName $DNS_HOSTNAME.$DNS_DOMAIN
+    DocumentRoot /var/www/api-dns
+    DirectoryIndex index.php
+
+    <Directory /var/www/api-dns>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+        <FilesMatch \.php$>
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
+        </FilesMatch>
+    </Directory>
+
+    # Alias para el panel de tokens
+    Alias /admin /var/www/admin_panel
+    <Directory /var/www/admin_panel>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+        <FilesMatch \.php$>
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
+        </FilesMatch>
+    </Directory>
+</VirtualHost>
+EOF
+
+    a2ensite dns-api.conf
+    a2dissite 000-default.conf
+    systemctl restart apache2
+fi
+
 # 4. Instalación del Servidor DNS (BIND9)
 printf "${YELLOW}Instalando BIND9...${NC}\n"
 apt install -y bind9 bind9utils bind9-doc dnsutils
