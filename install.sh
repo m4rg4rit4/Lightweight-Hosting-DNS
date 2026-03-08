@@ -15,7 +15,23 @@ printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.5)...
 
 # Función de limpieza de variables
 sanitize_var() {
-    echo "$1" | tr -d '[:space:]\r\n' | sed 's/^#.*//'
+    # Eliminar espacios, saltos de línea y limpiar restos de comentarios shell/php
+    echo "$1" | tr -d '[:space:]\r\n' | sed -E 's|^//.*||; s|^#.*||'
+}
+
+# Función para extraer constantes de PHP de forma robusta
+get_php_const() {
+    local key=$1
+    local file=$2
+    if [ ! -f "$file" ]; then echo ""; return; fi
+    # Buscar línea de define activa (no comentada con // o #) permitiendo espacios
+    local line=$(grep -iE "^\s*define\s*\(\s*['\"]$key['\"]" "$file" | head -n 1)
+    if [ ! -z "$line" ]; then
+        # Extraer el valor entre las segundas comillas (simple o doble)
+        echo "$line" | sed -E "s/.*['\"][^'\"]*['\"]\s*,\s*['\"]([^'\"]*)['\"].*/\1/" | tr -d '\r '
+    else
+        echo ""
+    fi
 }
 
 # 1. Verificación de usuario root
@@ -35,16 +51,16 @@ mkdir -p "$API_PATH"
 
 if [ -f "$CONFIG_FILE" ]; then
     printf "${GREEN}Detectada instalación de Lightweight-Hosting. Reutilizando configuración.${NC}\n"
-    DB_PASS=$(grep "'DB_PASS'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
-    DB_USER=$(grep "'DB_USER'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
-    DB_NAME=$(grep "'DB_NAME'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
-    ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
+    DB_PASS=$(get_php_const "DB_PASS" "$CONFIG_FILE")
+    DB_USER=$(get_php_const "DB_USER" "$CONFIG_FILE")
+    DB_NAME=$(get_php_const "DB_NAME" "$CONFIG_FILE")
+    ADMIN_EMAIL=$(get_php_const "ADMIN_EMAIL" "$CONFIG_FILE")
     
     # Intentar recuperar constantes específicas si ya existen
-    DNS_HOSTNAME=$(grep "'DNS_HOSTNAME'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
-    DNS_DOMAIN=$(grep "'DNS_DOMAIN'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
+    DNS_HOSTNAME=$(get_php_const "DNS_HOSTNAME" "$CONFIG_FILE")
+    DNS_DOMAIN=$(get_php_const "DNS_DOMAIN" "$CONFIG_FILE")
     
-    # Limpiar lo recuperado
+    # Limpiar lo recuperado (quitar espacios residuales)
     DB_PASS=$(sanitize_var "$DB_PASS")
     DB_USER=$(sanitize_var "$DB_USER")
     DB_NAME=$(sanitize_var "$DB_NAME")
@@ -65,6 +81,10 @@ fi
 # Preparar sugerencias inteligentes para los prompts (siempre preguntar)
 DNS_HOSTNAME=$(sanitize_var "$DNS_HOSTNAME")
 DNS_DOMAIN=$(sanitize_var "$DNS_DOMAIN")
+
+# Si son placeholders del template, vaciarlos para que funcionen las sugerencias
+[[ "$DNS_HOSTNAME" == "{{"* ]] && DNS_HOSTNAME=""
+[[ "$DNS_DOMAIN" == "{{"* ]] && DNS_DOMAIN=""
 
 SUGGESTED_HOSTNAME=${DNS_HOSTNAME:-$(hostname -s)}
 SUGGESTED_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
@@ -191,10 +211,18 @@ if [ "$HAS_LWH" = true ]; then
     update_php_const() {
         local key=$1
         local val=$2
-        if grep -q "'$key'" "$CONFIG_FILE"; then
-            sed -i "s|define('$key',.*|define('$key', '$val');|g" "$CONFIG_FILE"
+        # Si la constante ya existe (comentada o no, con cualquier espacio/comilla)
+        if grep -iqE "define\s*\(\s*['\"]$key['\"]" "$CONFIG_FILE"; then
+            # Reemplazar la línea que contiene la definición (comentada o no) por una definición limpia y activa
+            sed -i "s|^.*define\s*(\s*['\"]$key['\"]\s*,.*|define('$key', '$val');|gI" "$CONFIG_FILE"
         else
-            sed -i "s|?>|define('$key', '$val');\n?>|" "$CONFIG_FILE"
+            # Si no existe, intentar añadir antes de ?> (considerando espacios antes del ?>)
+            if grep -q "?>" "$CONFIG_FILE"; then
+                sed -i "s|\s*?>|define('$key', '$val');\n?>|" "$CONFIG_FILE"
+            else
+                # Si no hay ?>, simplemente añadir al final
+                echo "define('$key', '$val');" >> "$CONFIG_FILE"
+            fi
         fi
     }
 
