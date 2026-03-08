@@ -11,7 +11,12 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (Lightweight-Hosting-DNS)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.5)...${NC}\n"
+
+# Función de limpieza de variables
+sanitize_var() {
+    echo "$1" | tr -d '[:space:]\r\n' | sed 's/^#.*//'
+}
 
 # 1. Verificación de usuario root
 if [ "$EUID" -ne 0 ]; then 
@@ -38,6 +43,15 @@ if [ -f "$CONFIG_FILE" ]; then
     # Intentar recuperar constantes específicas si ya existen
     DNS_HOSTNAME=$(grep "'DNS_HOSTNAME'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
     DNS_DOMAIN=$(grep "'DNS_DOMAIN'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
+    
+    # Limpiar lo recuperado
+    DB_PASS=$(sanitize_var "$DB_PASS")
+    DB_USER=$(sanitize_var "$DB_USER")
+    DB_NAME=$(sanitize_var "$DB_NAME")
+    ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
+    DNS_HOSTNAME=$(sanitize_var "$DNS_HOSTNAME")
+    DNS_DOMAIN=$(sanitize_var "$DNS_DOMAIN")
+    
     HAS_LWH=true
 else
     printf "${YELLOW}Lightweight-Hosting no detectado. Preparando entorno...${NC}\n"
@@ -49,8 +63,8 @@ else
 fi
 
 # Preparar sugerencias inteligentes para los prompts (siempre preguntar)
-DNS_HOSTNAME=$(echo "$DNS_HOSTNAME" | tr -d '[:space:]')
-DNS_DOMAIN=$(echo "$DNS_DOMAIN" | tr -d '[:space:]')
+DNS_HOSTNAME=$(sanitize_var "$DNS_HOSTNAME")
+DNS_DOMAIN=$(sanitize_var "$DNS_DOMAIN")
 
 SUGGESTED_HOSTNAME=${DNS_HOSTNAME:-$(hostname -s)}
 SUGGESTED_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
@@ -59,11 +73,11 @@ SUGGESTED_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
 printf "${YELLOW}Configuración de Identidad del Servidor DNS:${NC}\n"
 read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$SUGGESTED_HOSTNAME]: " INPUT_HOSTNAME
 DNS_HOSTNAME=${INPUT_HOSTNAME:-$SUGGESTED_HOSTNAME}
-DNS_HOSTNAME=$(echo "$DNS_HOSTNAME" | tr -d '[:space:]')
+DNS_HOSTNAME=$(sanitize_var "$DNS_HOSTNAME")
 
 read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMAIN]: " INPUT_DOMAIN
 DNS_DOMAIN=${INPUT_DOMAIN:-$SUGGESTED_DOMAIN}
-DNS_DOMAIN=$(echo "$DNS_DOMAIN" | tr -d '[:space:]' | sed 's/^\.//')
+DNS_DOMAIN=$(sanitize_var "$DNS_DOMAIN" | sed 's/^\.//')
 
 FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
 printf "${GREEN}FQDN configurado como: ${YELLOW}$FULL_FQDN${NC}\n"
@@ -78,11 +92,10 @@ else
 fi
 
 # Configuración de Email (siempre preguntar)
-ADMIN_EMAIL=$(echo "$ADMIN_EMAIL" | tr -d '[:space:]')
 DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$DNS_DOMAIN"}
 read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL
 ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
-ADMIN_EMAIL=$(echo "$ADMIN_EMAIL" | tr -d '[:space:]')
+ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
 
 # Sincronizar constantes de email
 DNS_ADMIN_EMAIL=$ADMIN_EMAIL
