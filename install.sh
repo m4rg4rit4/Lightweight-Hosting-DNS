@@ -286,14 +286,18 @@ fi
 
 # 3.3 Configurar VirtualHost si es Stand-alone (No hay Lightweight-Hosting)
 if [ "$HAS_LWH" = false ]; then
-    printf "${YELLOW}Configurando VirtualHost para DNS API (Stand-alone)...${NC}\n"
+    printf "${YELLOW}Configurando Apache en Puerto 8080 para DNS API (Stand-alone)...${NC}\n"
     
+    # Asegurar que Apache escucha en el puerto 8080
+    if ! grep -q "Listen 8080" /etc/apache2/ports.conf; then
+        echo "Listen 8080" >> /etc/apache2/ports.conf
+    fi
+
     # Detección del socket de PHP
     REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
     
     cat <<EOF > /etc/apache2/sites-available/dns-api.conf
-<VirtualHost *:80>
-    ServerName $DNS_HOSTNAME.$DNS_DOMAIN
+<VirtualHost *:8080>
     DocumentRoot /var/www/api-dns
     DirectoryIndex index.php
 
@@ -320,7 +324,6 @@ if [ "$HAS_LWH" = false ]; then
 EOF
 
     a2ensite dns-api.conf
-    a2dissite 000-default.conf
     systemctl restart apache2
 fi
 
