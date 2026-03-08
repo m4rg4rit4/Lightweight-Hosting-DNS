@@ -91,11 +91,11 @@ SUGGESTED_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
 [ -z "$SUGGESTED_DOMAIN" ] || [ "$SUGGESTED_DOMAIN" = "." ] && SUGGESTED_DOMAIN="tu-dominio.com"
 
 printf "${YELLOW}Configuración de Identidad del Servidor DNS:${NC}\n"
-read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$SUGGESTED_HOSTNAME]: " INPUT_HOSTNAME
+read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$SUGGESTED_HOSTNAME]: " INPUT_HOSTNAME </dev/tty
 DNS_HOSTNAME=${INPUT_HOSTNAME:-$SUGGESTED_HOSTNAME}
 DNS_HOSTNAME=$(sanitize_var "$DNS_HOSTNAME")
 
-read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMAIN]: " INPUT_DOMAIN
+read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMAIN]: " INPUT_DOMAIN </dev/tty
 DNS_DOMAIN=${INPUT_DOMAIN:-$SUGGESTED_DOMAIN}
 DNS_DOMAIN=$(sanitize_var "$DNS_DOMAIN" | sed 's/^\.//')
 
@@ -113,7 +113,7 @@ fi
 
 # Configuración de Email (siempre preguntar)
 DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$DNS_DOMAIN"}
-read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL
+read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL </dev/tty
 ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
 ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
 
