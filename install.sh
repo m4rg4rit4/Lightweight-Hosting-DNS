@@ -11,7 +11,7 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.6)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.7)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -390,9 +390,18 @@ CREATE TABLE IF NOT EXISTS sys_dns_tokens (
 );
 EOF
 
-# Generar y mostrar un primer token maestro para la API
-MASTER_TOKEN=$(openssl rand -hex 16)
-mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "INSERT IGNORE INTO sys_dns_tokens (token, client_name) VALUES ('$MASTER_TOKEN', 'Master Admin Token');"
+# Comprobar si ya existe un token maestro para la API
+EXISTING_MASTER=$(mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -ss -e "SELECT token FROM sys_dns_tokens WHERE client_name = 'Master Admin Token' LIMIT 1;")
+
+if [ -n "$EXISTING_MASTER" ]; then
+    MASTER_TOKEN="$EXISTING_MASTER"
+    printf "${YELLOW}Token maestro existente recuperado de la base de datos.${NC}\n"
+else
+    # Generar y guardar un primer token maestro para la API
+    MASTER_TOKEN=$(openssl rand -hex 16)
+    mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "INSERT INTO sys_dns_tokens (token, client_name) VALUES ('$MASTER_TOKEN', 'Master Admin Token');"
+    printf "${GREEN}Nuevo token maestro generado.${NC}\n"
+fi
 
 # 6. Descarga de archivos desde GitHub
 printf "${YELLOW}Descargando archivos del servidor DNS desde GitHub...${NC}\n"
