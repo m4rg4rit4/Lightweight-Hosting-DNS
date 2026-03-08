@@ -49,24 +49,31 @@ else
 fi
 
 # Preparar sugerencias inteligentes para los prompts (siempre preguntar)
+DNS_HOSTNAME=$(echo "$DNS_HOSTNAME" | tr -d '[:space:]')
+DNS_DOMAIN=$(echo "$DNS_DOMAIN" | tr -d '[:space:]')
+
 SUGGESTED_HOSTNAME=${DNS_HOSTNAME:-$(hostname -s)}
 SUGGESTED_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
-[ -z "$SUGGESTED_DOMAIN" ] && SUGGESTED_DOMAIN="tu-dominio.com"
+[ -z "$SUGGESTED_DOMAIN" ] || [ "$SUGGESTED_DOMAIN" = "." ] && SUGGESTED_DOMAIN="tu-dominio.com"
 
 printf "${YELLOW}Configuración de Identidad del Servidor DNS:${NC}\n"
 read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$SUGGESTED_HOSTNAME]: " INPUT_HOSTNAME
 DNS_HOSTNAME=${INPUT_HOSTNAME:-$SUGGESTED_HOSTNAME}
+DNS_HOSTNAME=$(echo "$DNS_HOSTNAME" | tr -d '[:space:]')
 
 read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMAIN]: " INPUT_DOMAIN
 DNS_DOMAIN=${INPUT_DOMAIN:-$SUGGESTED_DOMAIN}
+DNS_DOMAIN=$(echo "$DNS_DOMAIN" | tr -d '[:space:]' | sed 's/^\.//')
 
 FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
 printf "${GREEN}FQDN configurado como: ${YELLOW}$FULL_FQDN${NC}\n"
 
 # Configuración de Email (siempre preguntar)
+ADMIN_EMAIL=$(echo "$ADMIN_EMAIL" | tr -d '[:space:]')
 DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$DNS_DOMAIN"}
 read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " INPUT_EMAIL
 ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
+ADMIN_EMAIL=$(echo "$ADMIN_EMAIL" | tr -d '[:space:]')
 
 # Sincronizar constantes de email
 DNS_ADMIN_EMAIL=$ADMIN_EMAIL
