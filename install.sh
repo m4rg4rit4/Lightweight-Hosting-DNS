@@ -68,6 +68,15 @@ DNS_DOMAIN=$(echo "$DNS_DOMAIN" | tr -d '[:space:]' | sed 's/^\.//')
 FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
 printf "${GREEN}FQDN configurado como: ${YELLOW}$FULL_FQDN${NC}\n"
 
+# 2.1 Aplicar Identidad al Sistema
+printf "${YELLOW}Aplicando identidad al servidor...${NC}\n"
+hostnamectl set-hostname "$FULL_FQDN"
+if grep -q "127.0.1.1" /etc/hosts; then
+    sed -i "s/127.0.1.1.*/127.0.1.1\t$FULL_FQDN\t$DNS_HOSTNAME/" /etc/hosts
+else
+    printf "127.0.1.1\t$FULL_FQDN\t$DNS_HOSTNAME\n" >> /etc/hosts
+fi
+
 # Configuración de Email (siempre preguntar)
 ADMIN_EMAIL=$(echo "$ADMIN_EMAIL" | tr -d '[:space:]')
 DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$DNS_DOMAIN"}
