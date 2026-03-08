@@ -55,16 +55,23 @@ else
     DB_NAME="dbadmin"
     DB_PASS=$(openssl rand -base64 18)
     
-    # Preguntar datos
-    FULL_FQDN=$(hostname -f)
-    read -p "Introduce el FQDN del servidor (ej: ns1.tu-dominio.com) [$FULL_FQDN]: " INPUT_FQDN
-    FULL_FQDN=${INPUT_FQDN:-$FULL_FQDN}
+    # Preguntar datos de forma explícita
+    DETECTED_HOSTNAME=$(hostname -s)
+    DETECTED_DOMAIN=$(hostname -d)
+    [ -z "$DETECTED_DOMAIN" ] && DETECTED_DOMAIN="tu-dominio.com"
+
+    printf "${YELLOW}Configuración de Identidad del Servidor DNS:${NC}\n"
+    read -p "1. Introduce el NOMBRE DEL HOST (ej: ns1) [$DETECTED_HOSTNAME]: " INPUT_HOSTNAME
+    DNS_HOSTNAME=${INPUT_HOSTNAME:-$DETECTED_HOSTNAME}
+
+    read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$DETECTED_DOMAIN]: " INPUT_DOMAIN
+    DNS_DOMAIN=${INPUT_DOMAIN:-$DETECTED_DOMAIN}
     
-    DNS_HOSTNAME=$(echo $FULL_FQDN | cut -d. -f1)
-    DNS_DOMAIN=$(echo $FULL_FQDN | cut -d. -f2-)
-    
+    FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
+    printf "${GREEN}FQDN configurado como: $FULL_FQDN${NC}\n"
+
     DEFAULT_EMAIL="admin@$DNS_DOMAIN"
-    read -p "Introduce el email del administrador [$DEFAULT_EMAIL]: " ADMIN_EMAIL
+    read -p "3. Introduce el email del administrador [$DEFAULT_EMAIL]: " ADMIN_EMAIL
     ADMIN_EMAIL=${ADMIN_EMAIL:-$DEFAULT_EMAIL}
     
     DNS_ADMIN_EMAIL=$ADMIN_EMAIL
