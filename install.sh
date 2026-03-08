@@ -165,7 +165,19 @@ CREATE TABLE IF NOT EXISTS sys_dns_records (
     priority INT NULL,
     FOREIGN KEY (zone_id) REFERENCES sys_dns_zones(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS sys_dns_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token VARCHAR(255) UNIQUE NOT NULL,
+    client_name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 EOF
+
+# Generar y mostrar un primer token maestro para la API
+MASTER_TOKEN=$(openssl rand -hex 16)
+mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "INSERT IGNORE INTO sys_dns_tokens (token, client_name) VALUES ('$MASTER_TOKEN', 'Master Admin Token');"
 
 # 6. Configurar Cron Job
 printf "${YELLOW}Configurando Cron Job para resolver DNS...${NC}\n"
@@ -176,7 +188,17 @@ if ! crontab -l 2>/dev/null | grep -q "sync_dns.php"; then
     printf "${GREEN}Cron de sync_dns configurado.${NC}\n"
 fi
 
-# 7. Completado
+# 7. Desplegar Interfaz de Administración Web
+printf "${YELLOW}Configurando interfaz web de administración de Tokens...${NC}\n"
+# En modo local copiaremos el archivo (pensando en el repo clonado)
+# En el futuro esto también se puede bajar por curl como los scripts de LWH
+if [ -f "./src/admin/dns_tokens.php" ]; then
+    cp "./src/admin/dns_tokens.php" "$ADMIN_PATH/dns_tokens.php"
+    chmod 644 "$ADMIN_PATH/dns_tokens.php"
+    chown www-data:www-data "$ADMIN_PATH/dns_tokens.php"
+fi
+
+# 8. Activar Configuraciones de BIND
 systemctl restart bind9
 
 printf "${GREEN}====================================================${NC}\n"
@@ -185,4 +207,5 @@ printf "${GREEN}====================================================${NC}\n"
 if [ "$HAS_LWH" = false ]; then
     printf "${YELLOW}Stand-alone Setup: DB dbadmin guardada con pass: $DB_PASS${NC}\n"
 fi
+printf "${YELLOW}API Master Token: ${GREEN}$MASTER_TOKEN${NC}\n"
 printf "Recuerda descargar/copiar los scripts PHP a $ENGINE_PATH y $API_PATH\n"
