@@ -7,7 +7,7 @@
 
 Este sistema formará parte de un cluster de servidores DNS (primarios y secundarios) que correrán en máquinas virtuales o VPS con **recursos muy limitados (1 Core CPU, 1GB RAM)**.
 Por este motivo, cada componente (PHP, Base de Datos y BIND9) debe configurarse con las siguientes premisas:
-* **PHP Base/API**: Evitar cargar frameworks pesados. Los scripts `/api/dns/*` deben ser archivos PHP nativos muy ligeros apoyados en PDO puro para que respondan en milisegundos sin ahogar la memoria.
+* **PHP Base/API**: Evitar cargar frameworks pesados. Los scripts `/api-dns/*` deben ser archivos PHP nativos muy ligeros apoyados en PDO puro para que respondan en milisegundos sin ahogar la memoria.
 * **BIND9**: Debe limitarse la caché en memoria y los logs para evitar que un ataque DNS amplification o el propio uso normal sature la RAM de 1GB.
 * **Cron (`sync_dns.php`)**: Debe procesar por lotes (arrays) para aprovechar la memoria eficientemente, liberar las variables pesadas (`unset`) tras cada iteración de un dominio y terminar su ejecución lo más rápido posible.
 
@@ -86,7 +86,7 @@ Para almacenar los registros individuales de cada zona, permitiendo su regenerac
 
 ## 2. API Endpoints (Desarrollo en PHP)
 
-### `POST /api/dns/add`
+### `POST /api-dns/add`
 
 * **Función**: Recibe `domain` e `ip`.
 * **Lógica**:
@@ -97,12 +97,12 @@ Para almacenar los registros individuales de cada zona, permitiendo su regenerac
 
 
 
-### `POST /api/dns/delete`
+### `POST /api-dns/delete`
 
 * **Función**: Recibe `domain` para su eliminación completa.
 * **Lógica**: Insertar en `sys_dns_requests` con status `pending` y action `delete`.
 
-### `POST /api/dns/record/add`
+### `POST /api-dns/record/add`
 
 * **Función**: Añade un registro individual (ej. TXT, MX, A) a un dominio ya existente. Acepta opcionalmente un parámetro `ttl` para tener un TTL granular por registro. Especialmente diseñado para la configuración de correo:
   * **DKIM**: Inserta un registro TXT con nombre `{selector}._domainkey`. Permite múltiples entradas sin colisión.
@@ -111,7 +111,7 @@ Para almacenar los registros individuales de cada zona, permitiendo su regenerac
 * **Validación CNAME**: Si se intenta añadir cualquier registro a un nombre que ya tiene un CNAME, o se intenta añadir un CNAME a un nombre que ya tiene otros registros, la API devolverá HTTP 400 (Regla de Oro DNS).
 * **Lógica**: Insertar en `sys_dns_records` el nuevo campo y generar una petición `update` en `sys_dns_requests` para que el cron regenere el archivo de zona y haga reload.
 
-### `POST /api/dns/record/del`
+### `POST /api-dns/record/del`
 
 * **Función**: Elimina un registro DNS específico de un dominio (ej. un `MX` antiguo, un `A` de un subdominio o revocar un `DKIM`).
 * **Lógica**:
@@ -120,17 +120,17 @@ Para almacenar los registros individuales de cada zona, permitiendo su regenerac
 3. Eliminar la fila de `sys_dns_records` (si no es una reducción de SPF).
 4. Insertar en `sys_dns_requests` con status `pending` y action `update` para que el cron regenere la zona.
 
-### `GET /api/dns/status/{id}`
+### `GET /api-dns/status/{id}`
 
 * **Función**: Consultar si el cambio se ha implementado.
 * **Lógica**: Buscar el `id` y retornar el campo `status`. Si es `error`, incluir el `error_log`.
 
-### `GET /api/dns/records/{domain}`
+### `GET /api-dns/records/{domain}`
 
 * **Función**: Consultar todos los registros DNS configurados para un dominio (útil para comprobar firmas DKIM, registros TXT, MX, etc.).
 * **Lógica**: Buscar en `sys_dns_zones` el dominio para obtener el `zone_id`, y luego retornar todos los registros asociados en `sys_dns_records`.
 
-### `GET /api/dns/query/{fqdn}`
+### `GET /api-dns/query/{fqdn}`
 
 * **Función**: Consulta rápida para obtener el valor directo (ej. IP o CNAME) de un subdominio o registro exacto (ej. `host9.ingeniacom.com`).
 * **Lógica**: Buscar el valor correspondiente al FQDN (cruzando `sys_dns_records` con `sys_dns_zones`) y retornar directamente el campo `content` (habitualmente el tipo `A`).
@@ -197,7 +197,7 @@ Este instalador tiene como objetivos:
 
 Dado que estos endpoints tienen la capacidad de alterar el ecosistema DNS al completo, es imperativo proteger su acceso:
 
-1. **Autenticación Requerida**: Todas las peticiones a `/api/dns/*` deben validarse mediante un token (ej. `Authorization: Bearer <API_KEY>`) pre-compartido entre los servidores.
+1. **Autenticación Requerida**: Todas las peticiones a `/api-dns/*` deben validarse mediante un token (ej. `Authorization: Bearer <API_KEY>`) pre-compartido entre los servidores.
 2. **Restricción de IP (Opcional/Recomendado)**: Limitar la ejecución de los endpoints para que solo acepten peticiones provenientes de las IPs conocidas de tus servidores web o de correo.
 
 ---

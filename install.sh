@@ -23,7 +23,7 @@ fi
 ADMIN_PATH="/var/www/admin_panel"
 CONFIG_FILE="$ADMIN_PATH/config.php"
 ENGINE_PATH="/usr/local/bin/hosting"
-API_PATH="/var/www/dns_api"
+API_PATH="/var/www/api-dns"
 
 mkdir -p "$ENGINE_PATH"
 mkdir -p "$API_PATH"
