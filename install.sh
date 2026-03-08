@@ -183,20 +183,25 @@ function getPDO() {
 EOF
 fi
 
-# 3.1 Asegurar constantes DNS en instalaciones LWH existentes
+# 3.1 Actualizar/Enriquecer config.php con parámetros DNS y Let's Encrypt
 if [ "$HAS_LWH" = true ]; then
-    if ! grep -q "DNS_HOSTNAME" "$CONFIG_FILE"; then
-        printf "${YELLOW}Enriqueciendo config.php con parámetros DNS y Let's Encrypt...${NC}\n"
-        # Quitar el cierre de PHP si existe para añadir las nuevas constantes
-        sed -i 's/?>//' "$CONFIG_FILE"
-        cat <<EOF >> "$CONFIG_FILE"
-define('DNS_HOSTNAME', '$DNS_HOSTNAME');
-define('DNS_DOMAIN', '$DNS_DOMAIN');
-define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
-define('LETSENCRYPT_EMAIL', '$LETSENCRYPT_EMAIL');
-?>
-EOF
-    fi
+    printf "${YELLOW}Actualizando configuración en config.php...${NC}\n"
+    
+    # Función interna para actualizar o añadir constante en PHP
+    update_php_const() {
+        local key=$1
+        local val=$2
+        if grep -q "'$key'" "$CONFIG_FILE"; then
+            sed -i "s|define('$key',.*|define('$key', '$val');|g" "$CONFIG_FILE"
+        else
+            sed -i "s|?>|define('$key', '$val');\n?>|" "$CONFIG_FILE"
+        fi
+    }
+
+    update_php_const "DNS_HOSTNAME" "$DNS_HOSTNAME"
+    update_php_const "DNS_DOMAIN" "$DNS_DOMAIN"
+    update_php_const "DNS_ADMIN_EMAIL" "$DNS_ADMIN_EMAIL"
+    update_php_const "LETSENCRYPT_EMAIL" "$LETSENCRYPT_EMAIL"
 fi
 
 # 3.2 Optimización Web (Apache2 + PHP-FPM)
