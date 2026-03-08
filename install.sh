@@ -30,14 +30,14 @@ mkdir -p "$API_PATH"
 
 if [ -f "$CONFIG_FILE" ]; then
     printf "${GREEN}Detectada instalación de Lightweight-Hosting. Reutilizando configuración.${NC}\n"
-    DB_PASS=$(grep "'DB_PASS'" "$CONFIG_FILE" | cut -d"'" -f4)
-    DB_USER=$(grep "'DB_USER'" "$CONFIG_FILE" | cut -d"'" -f4)
-    DB_NAME=$(grep "'DB_NAME'" "$CONFIG_FILE" | cut -d"'" -f4)
-    ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
+    DB_PASS=$(grep "'DB_PASS'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
+    DB_USER=$(grep "'DB_USER'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
+    DB_NAME=$(grep "'DB_NAME'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
+    ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
     
     # Intentar recuperar constantes específicas si ya existen
-    DNS_HOSTNAME=$(grep "'DNS_HOSTNAME'" "$CONFIG_FILE" | cut -d"'" -f4)
-    DNS_DOMAIN=$(grep "'DNS_DOMAIN'" "$CONFIG_FILE" | cut -d"'" -f4)
+    DNS_HOSTNAME=$(grep "'DNS_HOSTNAME'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
+    DNS_DOMAIN=$(grep "'DNS_DOMAIN'" "$CONFIG_FILE" | cut -d"'" -f4 | tr -d '\r')
     HAS_LWH=true
 else
     printf "${YELLOW}Lightweight-Hosting no detectado. Preparando entorno...${NC}\n"
@@ -61,7 +61,7 @@ read -p "2. Introduce el DOMINIO PRINCIPAL (ej: tu-dominio.com) [$SUGGESTED_DOMA
 DNS_DOMAIN=${INPUT_DOMAIN:-$SUGGESTED_DOMAIN}
 
 FULL_FQDN="${DNS_HOSTNAME}.${DNS_DOMAIN}"
-printf "${GREEN}FQDN configurado como: $FULL_FQDN${NC}\n"
+printf "${GREEN}FQDN configurado como: ${YELLOW}$FULL_FQDN${NC}\n"
 
 # Configuración de Email (siempre preguntar)
 DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$DNS_DOMAIN"}
@@ -71,6 +71,7 @@ ADMIN_EMAIL=${INPUT_EMAIL:-$DEFAULT_EMAIL}
 # Sincronizar constantes de email
 DNS_ADMIN_EMAIL=$ADMIN_EMAIL
 LETSENCRYPT_EMAIL=$ADMIN_EMAIL
+printf "\n"
 
 # 3. Instalación de paquetes y optimización de recursos (Target: 1GB RAM)
 printf "${YELLOW}Verificando dependencias del sistema y optimizando recursos...${NC}\n"
