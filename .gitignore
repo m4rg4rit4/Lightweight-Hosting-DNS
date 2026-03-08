@@ -1,0 +1,16 @@
+# Local configuration
+config.php
+.env
+
+# Logs and temporary files
+*.log
+tmp/
+locks/
+
+# IDE files
+.vscode/
+.idea/
+.DS_Store
+
+# PHP dependencies
+vendor/
