@@ -29,28 +29,71 @@ mkdir -p "$ENGINE_PATH"
 mkdir -p "$API_PATH"
 
 if [ -f "$CONFIG_FILE" ]; then
-    printf "${GREEN}Detectada instalación de Lightweight-Hosting. Reutilizando configuración de bases de datos.${NC}\n"
+    printf "${GREEN}Detectada instalación de Lightweight-Hosting. Reutilizando configuración.${NC}\n"
     DB_PASS=$(grep "'DB_PASS'" "$CONFIG_FILE" | cut -d"'" -f4)
     DB_USER=$(grep "'DB_USER'" "$CONFIG_FILE" | cut -d"'" -f4)
     DB_NAME=$(grep "'DB_NAME'" "$CONFIG_FILE" | cut -d"'" -f4)
+    ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
+    
+    # Intentar recuperar constantes específicas si ya existen
+    DNS_HOSTNAME=$(grep "'DNS_HOSTNAME'" "$CONFIG_FILE" | cut -d"'" -f4)
+    DNS_DOMAIN=$(grep "'DNS_DOMAIN'" "$CONFIG_FILE" | cut -d"'" -f4)
+    DNS_ADMIN_EMAIL=$(grep "'DNS_ADMIN_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
+    LETSENCRYPT_EMAIL=$(grep "'LETSENCRYPT_EMAIL'" "$CONFIG_FILE" | cut -d"'" -f4)
+
+    # Fallbacks si son nuevas
+    DNS_HOSTNAME=${DNS_HOSTNAME:-$(hostname -s)}
+    DNS_DOMAIN=${DNS_DOMAIN:-$(hostname -d)}
+    DNS_ADMIN_EMAIL=${DNS_ADMIN_EMAIL:-$ADMIN_EMAIL}
+    LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-$ADMIN_EMAIL}
+    
     HAS_LWH=true
 else
-    printf "${YELLOW}Lightweight-Hosting no detectado. Se preparará un entorno standalone...${NC}\n"
+    printf "${YELLOW}Lightweight-Hosting no detectado. Preparando entorno...${NC}\n"
     HAS_LWH=false
     DB_USER="dbadmin"
     DB_NAME="dbadmin"
     DB_PASS=$(openssl rand -base64 18)
+    
+    # Preguntar datos
+    FULL_FQDN=$(hostname -f)
+    read -p "Introduce el FQDN del servidor (ej: ns1.tu-dominio.com) [$FULL_FQDN]: " INPUT_FQDN
+    FULL_FQDN=${INPUT_FQDN:-$FULL_FQDN}
+    
+    DNS_HOSTNAME=$(echo $FULL_FQDN | cut -d. -f1)
+    DNS_DOMAIN=$(echo $FULL_FQDN | cut -d. -f2-)
+    
+    DEFAULT_EMAIL="admin@$DNS_DOMAIN"
+    read -p "Introduce el email del administrador [$DEFAULT_EMAIL]: " ADMIN_EMAIL
+    ADMIN_EMAIL=${ADMIN_EMAIL:-$DEFAULT_EMAIL}
+    
+    DNS_ADMIN_EMAIL=$ADMIN_EMAIL
+    LETSENCRYPT_EMAIL=$ADMIN_EMAIL
 fi
 
-# 3. Instalación de paquetes de Base de Datos y Web si no existen
-printf "${YELLOW}Verificando dependencias del sistema...${NC}\n"
+# 3. Instalación de paquetes y optimización de recursos (Target: 1GB RAM)
+printf "${YELLOW}Verificando dependencias del sistema y optimizando recursos...${NC}\n"
 apt update -y
+apt install -y curl git unzip cron certbot python3-certbot-apache dnsutils ufw
 
-# Instalar PHP y MariaDB si son necesarios (en modo standalone)
+# 3.1 Optimización MariaDB (Low Memory Profile)
 if ! command -v mariadb >/dev/null 2>&1; then
-    printf "${YELLOW}Instalando MariaDB (Stand-alone)...${NC}\n"
+    printf "${YELLOW}Instalando MariaDB con perfil de bajo consumo...${NC}\n"
     apt install -y mariadb-server
-    systemctl start mariadb
+    
+    mkdir -p /etc/mysql/mariadb.conf.d/
+    cat <<EOF > /etc/mysql/mariadb.conf.d/99-low-memory.cnf
+[mysqld]
+performance_schema = OFF
+innodb_buffer_pool_size = 128M
+innodb_log_file_size = 32M
+max_connections = 20
+key_buffer_size = 8M
+thread_cache_size = 4
+query_cache_size = 0
+query_cache_type = 0
+EOF
+    systemctl restart mariadb
     
     ROOT_DB_PASS_FILE="/root/.hosting_db_root"
     if [ -f "$ROOT_DB_PASS_FILE" ]; then
@@ -61,12 +104,10 @@ if ! command -v mariadb >/dev/null 2>&1; then
         chmod 600 "$ROOT_DB_PASS_FILE"
     fi
     
-    # Asegurar root de MariaDB (si podemos acceder sin contraseña)
     if mariadb -e "status" >/dev/null 2>&1; then
         mariadb -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';"
     fi
     
-    # Crear auth temporal para operar
     cat <<EOF > /root/.my.cnf
 [client]
 user=root
@@ -74,24 +115,28 @@ password=$DB_ROOT_PASS
 EOF
     chmod 600 /root/.my.cnf
     
-    # Crear BD y usuario si es standalone
     mariadb -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`;"
     mariadb -e "DROP USER IF EXISTS '${DB_USER}'@'127.0.0.1';"
     mariadb -e "CREATE USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';"
     mariadb -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1';"
     mariadb -e "FLUSH PRIVILEGES;"
-    
-    # Limpiar auth temporal
     rm -f /root/.my.cnf
-    
-    # Generar config.php mínimo para la API standalone
+fi
+
+# Generar config.php mínimo para la API standalone
+if [ "$HAS_LWH" = false ]; then
     mkdir -p "$ADMIN_PATH"
     cat <<EOF > "$CONFIG_FILE"
 <?php
-define('DB_HOST', '127.0.0.1');
+define('DB_HOST', 'localhost');
 define('DB_NAME', '$DB_NAME');
 define('DB_USER', '$DB_USER');
 define('DB_PASS', '$DB_PASS');
+define('ADMIN_EMAIL', '$ADMIN_EMAIL');
+define('DNS_HOSTNAME', '$DNS_HOSTNAME');
+define('DNS_DOMAIN', '$DNS_DOMAIN');
+define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
+define('LETSENCRYPT_EMAIL', '$LETSENCRYPT_EMAIL');
 
 function getPDO() {
     static \$pdo;
@@ -107,10 +152,56 @@ function getPDO() {
 EOF
 fi
 
-if ! command -v php >/dev/null 2>&1; then
-    printf "${YELLOW}Instalando PHP ligero (cli & fpm)...${NC}\n"
-    apt install -y php-cli php-mysql php-fpm apache2
-    a2enmod proxy_fcgi setenvif rewrite
+# 3.1 Asegurar constantes DNS en instalaciones LWH existentes
+if [ "$HAS_LWH" = true ]; then
+    if ! grep -q "DNS_HOSTNAME" "$CONFIG_FILE"; then
+        printf "${YELLOW}Enriqueciendo config.php con parámetros DNS y Let's Encrypt...${NC}\n"
+        # Quitar el cierre de PHP si existe para añadir las nuevas constantes
+        sed -i 's/?>//' "$CONFIG_FILE"
+        cat <<EOF >> "$CONFIG_FILE"
+define('DNS_HOSTNAME', '$DNS_HOSTNAME');
+define('DNS_DOMAIN', '$DNS_DOMAIN');
+define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
+define('LETSENCRYPT_EMAIL', '$LETSENCRYPT_EMAIL');
+?>
+EOF
+    fi
+fi
+
+# 3.2 Optimización Web (Apache2 + PHP-FPM)
+if ! command -v apache2 >/dev/null 2>&1; then
+    printf "${YELLOW}Instalando Apache2 y PHP-FPM (MPM Event)...${NC}\n"
+    apt install -y apache2 php-fpm php-cli php-mysql php-curl php-gd php-mbstring php-xml
+    
+    # Configurar MPM Event para bajo consumo (1GB RAM)
+    cat <<EOF > /etc/apache2/mods-available/mpm_event.conf
+<IfModule mpm_event_module>
+    StartServers             1
+    MinSpareThreads          5
+    MaxSpareThreads         10
+    ThreadLimit             64
+    ThreadsPerChild         20
+    MaxRequestWorkers       40
+    MaxConnectionsPerChild   1000
+</IfModule>
+EOF
+    
+    # Activar módulos esenciales
+    a2dismod mpm_prefork 2>/dev/null || true
+    a2enmod mpm_event proxy_fcgi setenvif rewrite ssl http2
+    
+    # Optimizar PHP-FPM (Modo OnDemand)
+    PHP_VER=$(ls /etc/php/ | grep -E '^[0-9.]+$' | head -n 1)
+    if [ ! -z "$PHP_VER" ]; then
+        POOL_FILE="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
+        if [ -f "$POOL_FILE" ]; then
+            sed -i 's/^pm = dynamic/pm = ondemand/' $POOL_FILE
+            sed -i 's/^pm.max_children = 5/pm.max_children = 10/' $POOL_FILE
+            sed -i 's/^;pm.process_idle_timeout = 10s;/pm.process_idle_timeout = 30s;/' $POOL_FILE
+        fi
+        systemctl restart php${PHP_VER}-fpm
+    fi
+    
     systemctl restart apache2
 fi
 
@@ -179,23 +270,43 @@ EOF
 MASTER_TOKEN=$(openssl rand -hex 16)
 mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "INSERT IGNORE INTO sys_dns_tokens (token, client_name) VALUES ('$MASTER_TOKEN', 'Master Admin Token');"
 
-# 6. Configurar Cron Job
+# 6. Descarga de archivos desde GitHub
+printf "${YELLOW}Descargando archivos del servidor DNS desde GitHub...${NC}\n"
+
+TEMP_DIR=$(mktemp -d /tmp/dns_XXXXXX)
+REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting-DNS/main"
+
+# Descargar archivos a /tmp primero
+curl -sSL "$REPO_RAW/src/admin/dns_tokens.php" -o "$TEMP_DIR/dns_tokens.php"
+curl -sSL "$REPO_RAW/src/api-dns/index.php" -o "$TEMP_DIR/index.php"
+curl -sSL "$REPO_RAW/src/engine/sync_dns.php" -o "$TEMP_DIR/sync_dns.php"
+curl -sSL "$REPO_RAW/src/engine/template.zone.php" -o "$TEMP_DIR/template.zone.php"
+
+if [ ! -f "$TEMP_DIR/dns_tokens.php" ] || [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/sync_dns.php" ]; then
+    printf "${RED}Error: No se pudieron descargar los archivos esenciales desde GitHub.${NC}\n"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+# Mover archivos a su destino final
+cp "$TEMP_DIR/dns_tokens.php" "$ADMIN_PATH/dns_tokens.php"
+cp "$TEMP_DIR/index.php" "$API_PATH/index.php"
+cp "$TEMP_DIR/sync_dns.php" "$ENGINE_PATH/sync_dns.php"
+cp "$TEMP_DIR/template.zone.php" "$ENGINE_PATH/template.zone.php"
+
+# Permisos y limpieza
+chown -R www-data:www-data "$ADMIN_PATH" "$API_PATH"
+chmod 644 "$ADMIN_PATH/dns_tokens.php" "$API_PATH/index.php" "$ENGINE_PATH/template.zone.php"
+chmod 700 "$ENGINE_PATH/sync_dns.php"
+rm -rf "$TEMP_DIR"
+
+# 7. Configurar Cron Job
 printf "${YELLOW}Configurando Cron Job para resolver DNS...${NC}\n"
 CRON_SCRIPT="$ENGINE_PATH/sync_dns.php"
 
 if ! crontab -l 2>/dev/null | grep -q "sync_dns.php"; then
     (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/php $CRON_SCRIPT > /dev/null 2>&1") | crontab -
     printf "${GREEN}Cron de sync_dns configurado.${NC}\n"
-fi
-
-# 7. Desplegar Interfaz de Administración Web
-printf "${YELLOW}Configurando interfaz web de administración de Tokens...${NC}\n"
-# En modo local copiaremos el archivo (pensando en el repo clonado)
-# En el futuro esto también se puede bajar por curl como los scripts de LWH
-if [ -f "./src/admin/dns_tokens.php" ]; then
-    cp "./src/admin/dns_tokens.php" "$ADMIN_PATH/dns_tokens.php"
-    chmod 644 "$ADMIN_PATH/dns_tokens.php"
-    chown www-data:www-data "$ADMIN_PATH/dns_tokens.php"
 fi
 
 # 8. Activar Configuraciones de BIND
@@ -208,4 +319,5 @@ if [ "$HAS_LWH" = false ]; then
     printf "${YELLOW}Stand-alone Setup: DB dbadmin guardada con pass: $DB_PASS${NC}\n"
 fi
 printf "${YELLOW}API Master Token: ${GREEN}$MASTER_TOKEN${NC}\n"
-printf "Recuerda descargar/copiar los scripts PHP a $ENGINE_PATH y $API_PATH\n"
+printf "${GREEN}Los scripts han sido desplegados automáticamente en $ENGINE_PATH y $API_PATH${NC}\n"
+printf "${GREEN}====================================================${NC}\n"

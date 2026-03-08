@@ -18,9 +18,10 @@ foreach ($records as $r) {
     }
 }
 
-// Valores por defecto
-$ns1 = 'ns1.' . $domain; // o tu dns predeterminado
-$admin_email = 'admin.' . $domain;
+// Valores por defecto o Globales
+$ns1 = (defined('DNS_HOSTNAME') && defined('DNS_DOMAIN')) ? DNS_HOSTNAME . '.' . DNS_DOMAIN : 'ns1.' . $domain;
+$admin_email_raw = defined('DNS_ADMIN_EMAIL') ? DNS_ADMIN_EMAIL : (defined('ADMIN_EMAIL') ? ADMIN_EMAIL : 'admin.' . $domain);
+$admin_email = str_replace('@', '.', $admin_email_raw);
 
 if ($soa) {
     // Si viene contenido completo

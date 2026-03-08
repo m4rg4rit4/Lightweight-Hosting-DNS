@@ -29,20 +29,30 @@ if (file_exists($configFile)) {
     }
 }
 
-// 1. Verificación de Seguridad (Token)
-if (!defined('DNS_API_KEY')) {
-    // Si no está definido en config.php, permitimos uno por defecto o forzamos error
-    // En producción DEBE estar definido.
-    response(500, false, "DNS_API_KEY no está configurada en config.php.");
-}
+$pdo = getPDO();
 
 $headers = getallheaders();
 $authHeader = isset($headers['Authorization']) ? $headers['Authorization'] : '';
+$providedToken = '';
 
-if (empty($authHeader) || $authHeader !== 'Bearer ' . DNS_API_KEY) {
-    // Permitir temporalmente sin auth si DNS_API_KEY es 'dev' para pruebas locales (opcional)
-    if (DNS_API_KEY !== 'dev') {
+if (strpos($authHeader, 'Bearer ') === 0) {
+    $providedToken = substr($authHeader, 7);
+}
+
+// Permitir 'dev' temporalmente solo si la constante DNS_API_KEY='dev' existe.
+$isMasterEnvToken = defined('DNS_API_KEY') && DNS_API_KEY === 'dev' && $providedToken === 'dev';
+
+if (!$isMasterEnvToken) {
+    if (empty($providedToken)) {
         response(401, false, "No autorizado. Proporciona un Bearer Token válido.");
+    }
+
+    $stmt = $pdo->prepare("SELECT id, client_name FROM sys_dns_tokens WHERE token = ? AND is_active = 1");
+    $stmt->execute([$providedToken]);
+    $tokenCheck = $stmt->fetch();
+
+    if (!$tokenCheck) {
+        response(401, false, "No autorizado. Token inválido o inactivo.");
     }
 }
 
@@ -61,7 +71,6 @@ if (strpos($requestUri, $basePath) !== false) {
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
-$pdo = getPDO();
 
 try {
     // Leer el body JSON si es POST

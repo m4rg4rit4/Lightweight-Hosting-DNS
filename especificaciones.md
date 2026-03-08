@@ -26,11 +26,15 @@ Tanto los scripts de la API como el script en background deberán incluir el arc
 ```php
 <?php
 // Estos valores ya estarán definidos en el servidor
-define('DB_HOST', '... ');
+define('DB_HOST', 'localhost');
 define('DB_NAME', 'dbadmin');
 define('DB_USER', 'dbadmin');
-define('DB_PASS', '... ');
+define('DB_PASS', '...');
 define('ADMIN_EMAIL', '...');
+define('DNS_HOSTNAME', 'ns1');
+define('DNS_DOMAIN', 'tu-dominio.com');
+define('DNS_ADMIN_EMAIL', 'admin@tu-dominio.com');
+define('LETSENCRYPT_EMAIL', 'admin@tu-dominio.com');
 define('DB_MANAGER_DIR', 'phpmyadmin');
 
 function getPDO() {
