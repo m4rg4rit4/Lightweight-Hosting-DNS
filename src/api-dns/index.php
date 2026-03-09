@@ -94,12 +94,20 @@ try {
         if (strpos($routeString, 'status/') === 0) {
             $id = intval(substr($routeString, 7));
             handleGetStatus($pdo, $id);
+        } elseif ($routeString === 'zones') {
+            handleGetZones($pdo);
+        } elseif (preg_match('/^zone\/(.*)\/export$/', $routeString, $matches)) {
+            $domain = $matches[1];
+            handleGetZoneExport($pdo, $domain);
         } elseif (strpos($routeString, 'records/') === 0) {
             $domain = substr($routeString, 8);
             handleGetRecords($pdo, $domain);
         } elseif (strpos($routeString, 'query/') === 0) {
             $fqdn = substr($routeString, 6);
             handleGetQuery($pdo, $fqdn);
+        } elseif (strpos($routeString, 'verify/') === 0) {
+            $domain = substr($routeString, 7);
+            handleGetVerify($pdo, $domain);
         } else {
             response(404, false, "Ruta GET no encontrada: $routeString");
         }
@@ -124,15 +132,34 @@ function handlePostAdd($pdo, $input) {
     $stmt = $pdo->prepare("SELECT id FROM sys_dns_zones WHERE domain = ?");
     $stmt->execute([$domain]);
     if ($stmt->fetch()) {
-        response(400, false, "El dominio ya existe en las zonas DNS.");
+        response(400, false, "El dominio ya existe en el sistema.");
     }
 
-    // Insertar petición pendiente
-    $stmt = $pdo->prepare("INSERT INTO sys_dns_requests (action, domain, target_ip, status) VALUES ('add', ?, ?, 'pending')");
-    $stmt->execute([$domain, $ip]);
-    $reqId = $pdo->lastInsertId();
+    // Insertar zona
+    $stmt = $pdo->prepare("INSERT INTO sys_dns_zones (domain, zone_file_path, is_active) VALUES (?, ?, 1)");
+    $zoneFile = "/etc/bind/zones/db." . $domain;
+    $stmt->execute([$domain, $zoneFile]);
+    $zoneId = $pdo->lastInsertId();
 
-    response(200, true, "La solicitud de alta ha sido recibida.", ['request_id' => $reqId, 'status' => 'pending']);
+    // Insertar registros base (NS y A del dominio)
+    $ns1 = (defined('DNS_HOSTNAME') && defined('DNS_DOMAIN')) ? DNS_HOSTNAME . '.' . DNS_DOMAIN : 'ns1.' . $domain;
+    $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'NS', ?)");
+    $stmt->execute([$zoneId, $ns1 . "."]);
+
+    $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'A', ?)");
+    $stmt->execute([$zoneId, $ip]);
+
+    // Encolar generación de zona
+    queueZoneUpdate($pdo, $domain);
+
+    // Verificación de delegación para informar
+    $verification = checkDomainDelegation($domain);
+
+    response(200, true, "Dominio añadido correctamente. Configure sus DNS para apuntar a $ns1", [
+        'domain' => $domain,
+        'dns_delegated' => $verification['delegated'],
+        'verification' => $verification
+    ]);
 }
 
 function handlePostDelete($pdo, $input) {
@@ -157,10 +184,9 @@ function handlePostDelete($pdo, $input) {
 }
 
 function handlePostRecordAdd($pdo, $input) {
-    // Argumentos: domain, name, type, content, ttl (optional), priority (optional, for MX/SRV)
     $domain = trim($input['domain'] ?? '');
-    $name = trim($input['name'] ?? ''); // Ej: '@', 'www', 'mail1._domainkey'
-    $type = strtoupper(trim($input['type'] ?? '')); // A, TXT, MX...
+    $name = trim($input['name'] ?? ''); 
+    $type = strtoupper(trim($input['type'] ?? '')); 
     $content = trim($input['content'] ?? '');
     $ttl = intval($input['ttl'] ?? 3600);
     $priority = isset($input['priority']) ? intval($input['priority']) : null;
@@ -169,14 +195,21 @@ function handlePostRecordAdd($pdo, $input) {
         response(400, false, "Faltan parámetros: domain, name, type, content son obligatorios.");
     }
 
-    // Obtener zone_id
+    // Obtener zone_id y verificar existencia
     $stmt = $pdo->prepare("SELECT id FROM sys_dns_zones WHERE domain = ?");
     $stmt->execute([$domain]);
     $zone = $stmt->fetch();
     if (!$zone) {
-        response(400, false, "El dominio principal '$domain' no existe.");
+        response(400, false, "Error: El dominio principal '$domain' debe ser añadido primero mediante /api-dns/add");
     }
     $zoneId = $zone['id'];
+
+    // Verificación de delegación (Aviso suave)
+    $verification = checkDomainDelegation($domain);
+    $warning = "";
+    if (!$verification['delegated']) {
+        $warning = " (Aviso: El dominio principal aún no parece estar correctamente delegado)";
+    }
 
     // Validación CNAME: Regla de oro
     if ($type === 'CNAME') {
@@ -202,7 +235,7 @@ function handlePostRecordAdd($pdo, $input) {
         $stmt->execute([$zoneId, $name, $type, $content, $ttl, $priority]);
         
         queueZoneUpdate($pdo, $domain);
-        response(200, true, "Registro $type añadido a $domain.");
+        response(200, true, "Registro $type añadido a $domain$warning.");
     }
 }
 
@@ -341,7 +374,124 @@ function handleGetQuery($pdo, $fqdn) {
     response(200, true, "Consulta resuelta.", ['fqdn' => $fqdn, 'results' => $records]);
 }
 
+function handleGetZones($pdo) {
+    $stmt = $pdo->query("SELECT id, domain, created_at, updated_at FROM sys_dns_zones ORDER BY domain ASC");
+    $zones = $stmt->fetchAll();
+    
+    foreach ($zones as &$zone) {
+        $verification = checkDomainDelegation($zone['domain']);
+        $zone['delegated'] = $verification['delegated'];
+        $zone['details'] = $verification;
+    }
+
+    response(200, true, "Lista de zonas recuperada.", ['zones' => $zones]);
+}
+
+function handleGetZoneExport($pdo, $domain) {
+    // Obtener la zona
+    $stmt = $pdo->prepare("SELECT id FROM sys_dns_zones WHERE domain = ?");
+    $stmt->execute([$domain]);
+    $zone = $stmt->fetch();
+    
+    if (!$zone) {
+        response(404, false, "La zona $domain no existe.");
+    }
+
+    // Obtener registros
+    $stmt = $pdo->prepare("SELECT name, type, content, ttl, priority FROM sys_dns_records WHERE zone_id = ? ORDER BY type='SOA' DESC, type='NS' DESC, name ASC");
+    $stmt->execute([$zone['id']]);
+    $records = $stmt->fetchAll();
+
+    // Generar formato BIND usando la plantilla si está disponible localmente, sino manualmente
+    $templateFile = __DIR__ . '/../engine/template.zone.php';
+    $serial = date('Ymd') . '01'; 
+    
+    header('Content-Type: text/plain; charset=utf-8');
+    if (file_exists($templateFile)) {
+        include $templateFile;
+    } else {
+        // Fallback básico si no hay template
+        echo "; Full Zone Export for $domain\n";
+        echo "\$ORIGIN $domain.\n";
+        echo "\$TTL 3600\n\n";
+        foreach ($records as $r) {
+            $priority = ($r['type'] === 'MX' || $r['type'] === 'SRV') ? ($r['priority'] ?? 10) . "\t" : "";
+            echo "{$r['name']}\t{$r['ttl']}\tIN\t{$r['type']}\t{$priority}{$r['content']}\n";
+        }
+    }
+    exit();
+}
+
+function handleGetVerify($pdo, $domain) {
+    if (empty($domain)) {
+        response(400, false, "Se requiere el dominio.");
+    }
+
+    $verification = checkDomainDelegation($domain);
+    
+    if ($verification['delegated']) {
+        $msg = "El dominio $domain está correctamente delegado a tus nameservers.";
+    } else {
+        $msg = "El dominio $domain NO está apuntando a tus nameservers o la propagación está en curso.";
+        if (isset($verification['found_ns'])) {
+            $msg .= " Nameservers encontrados: " . implode(', ', $verification['found_ns']);
+        }
+    }
+
+    response(200, true, $msg, [
+        'domain' => $domain,
+        'delegated' => $verification['delegated'],
+        'details' => $verification
+    ]);
+}
+
 // Helpers
+
+function checkDomainDelegation($domain) {
+    $expectedNS = '';
+    if (defined('DNS_HOSTNAME') && defined('DNS_DOMAIN')) {
+        $expectedNS = strtolower(DNS_HOSTNAME . '.' . DNS_DOMAIN);
+    }
+
+    if (empty($expectedNS)) {
+        return ['delegated' => false, 'error' => 'DNS_HOSTNAME o DNS_DOMAIN no definidos en config.php'];
+    }
+
+    // Intentar obtener registros NS
+    $nsRecords = dns_get_record($domain, DNS_NS);
+    $foundNS = [];
+    $isDelegated = false;
+
+    if ($nsRecords) {
+        foreach ($nsRecords as $record) {
+            $target = strtolower($record['target']);
+            $foundNS[] = $target;
+            if (strpos($target, $expectedNS) !== false) {
+                $isDelegated = true;
+            }
+        }
+    }
+
+    // Si no hay NS, probar con SOA (a veces indicativo)
+    if (!$isDelegated) {
+        $soaRecords = dns_get_record($domain, DNS_SOA);
+        if ($soaRecords) {
+            foreach ($soaRecords as $record) {
+                $mname = strtolower($record['mname']);
+                if (strpos($mname, $expectedNS) !== false) {
+                    $isDelegated = true;
+                    $foundNS[] = $mname . " (SOA)";
+                }
+            }
+        }
+    }
+
+    return [
+        'delegated' => $isDelegated,
+        'expected_ns' => $expectedNS,
+        'found_ns' => array_unique($foundNS)
+    ];
+}
 
 function queueZoneUpdate($pdo, $domain) {
     // Insertar un action 'add' que el cron tratará como 'update' si ya existe el archivo de zona, regenerándolo.

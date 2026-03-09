@@ -11,7 +11,7 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.7)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.8)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
