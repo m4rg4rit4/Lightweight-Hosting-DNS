@@ -11,7 +11,7 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.8)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.9)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -300,7 +300,7 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ]; then
     
     cat <<EOF > /etc/apache2/sites-available/dns-api.conf
 <VirtualHost *:8080>
-    DocumentRoot /var/www/api-dns
+    DocumentRoot /var/www
     DirectoryIndex index.php
 
     <Directory /var/www/api-dns>
@@ -312,8 +312,6 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ]; then
         </FilesMatch>
     </Directory>
 
-    # Alias para el panel de tokens
-    Alias /admin /var/www/admin_panel
     <Directory /var/www/admin_panel>
         Options -Indexes +FollowSymLinks
         AllowOverride All
@@ -412,6 +410,7 @@ REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting-DNS/ma
 # Descargar archivos a /tmp primero
 curl -sSL "$REPO_RAW/src/admin/dns_tokens.php" -o "$TEMP_DIR/dns_tokens.php"
 curl -sSL "$REPO_RAW/src/api-dns/index.php" -o "$TEMP_DIR/index.php"
+curl -sSL "$REPO_RAW/src/api-dns/.htaccess" -o "$TEMP_DIR/.htaccess"
 curl -sSL "$REPO_RAW/src/engine/sync_dns.php" -o "$TEMP_DIR/sync_dns.php"
 curl -sSL "$REPO_RAW/src/engine/template.zone.php" -o "$TEMP_DIR/template.zone.php"
 
@@ -424,12 +423,13 @@ fi
 # Mover archivos a su destino final
 cp "$TEMP_DIR/dns_tokens.php" "$ADMIN_PATH/dns_tokens.php"
 cp "$TEMP_DIR/index.php" "$API_PATH/index.php"
+cp "$TEMP_DIR/.htaccess" "$API_PATH/.htaccess"
 cp "$TEMP_DIR/sync_dns.php" "$ENGINE_PATH/sync_dns.php"
 cp "$TEMP_DIR/template.zone.php" "$ENGINE_PATH/template.zone.php"
 
 # Permisos y limpieza
 chown -R www-data:www-data "$ADMIN_PATH" "$API_PATH"
-chmod 644 "$ADMIN_PATH/dns_tokens.php" "$API_PATH/index.php" "$ENGINE_PATH/template.zone.php"
+chmod 644 "$ADMIN_PATH/dns_tokens.php" "$API_PATH/index.php" "$API_PATH/.htaccess" "$ENGINE_PATH/template.zone.php"
 chmod 700 "$ENGINE_PATH/sync_dns.php"
 rm -rf "$TEMP_DIR"
 
