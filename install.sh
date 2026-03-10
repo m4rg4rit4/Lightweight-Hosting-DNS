@@ -11,7 +11,14 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.0.9)...${NC}\n"
+# Detectar modo actualización
+UPDATE_MODE=false
+if [[ " $* " == *" /update "* ]]; then
+    UPDATE_MODE=true
+    printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
+fi
+
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.1.0)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -26,11 +33,13 @@ ask_input() {
     local var_name=$3
     local val=""
     
-    # Si estamos en un pipe, forzamos lectura de /dev/tty para no consumir el script
-    if [ ! -t 0 ]; then
-        read -p "$prompt" val < /dev/tty
-    else
-        read -p "$prompt" val
+    if [ "$UPDATE_MODE" = false ]; then
+        # Si estamos en un pipe, forzamos lectura de /dev/tty para no consumir el script
+        if [ ! -t 0 ]; then
+            read -p "$prompt" val < /dev/tty
+        else
+            read -p "$prompt" val
+        fi
     fi
     
     val=${val:-$default}
@@ -140,6 +149,10 @@ printf "\n"
 # 3. Instalación de paquetes y optimización de recursos (Target: 1GB RAM)
 printf "${YELLOW}Verificando dependencias del sistema y optimizando recursos...${NC}\n"
 apt update -y
+if [ "$UPDATE_MODE" = true ]; then
+    printf "${YELLOW}Actualizando sistema...${NC}\n"
+    apt upgrade -y
+fi
 apt install -y curl git unzip cron certbot python3-certbot-apache dnsutils ufw
 
 # 3.1 Optimización MariaDB (Low Memory Profile)
