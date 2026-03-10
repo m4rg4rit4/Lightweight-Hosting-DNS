@@ -24,8 +24,9 @@ $admin_email_raw = defined('DNS_ADMIN_EMAIL') ? DNS_ADMIN_EMAIL : (defined('ADMI
 $admin_email = str_replace('@', '.', $admin_email_raw);
 
 if ($soa) {
-    // Si viene contenido completo
-    echo "@\tIN\tSOA\t{$soa['content']}\n\n";
+    // Si viene contenido completo, permitimos marcador {SERIAL}
+    $soaContent = str_replace('{SERIAL}', $serial, $soa['content']);
+    echo "@\tIN\tSOA\t{$soaContent}\n\n";
 } else {
     // Generar SOA por defecto
     echo "@\tIN\tSOA\t{$ns1}. {$admin_email}. (\n";
