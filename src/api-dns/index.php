@@ -128,6 +128,19 @@ try {
             handleGetVerify($pdo, $domain);
         } elseif ($routeString === 'status/pending') {
             handleGetPendingStatus($pdo);
+        } elseif ($routeString === '' || $routeString === '/') {
+            response(200, true, "Lightweight DNS API is active.", [
+                'endpoints' => [
+                    'GET /api-dns/zones' => 'List all managed domains',
+                    'GET /api-dns/records/{domain}' => 'List records for a domain',
+                    'GET /api-dns/query/{fqdn}' => 'Queries which zone handles a given FQDN',
+                    'GET /api-dns/zone/{domain}/export' => 'Export zone in BIND format',
+                    'POST /api-dns/add' => 'Add a new authoritative zone',
+                    'POST /api-dns/record/add' => 'Add a DNS record',
+                    'POST /api-dns/record/edit' => 'Edit a DNS record',
+                    'POST /api-dns/record/del' => 'Delete a DNS record'
+                ]
+            ]);
         } else {
             response(404, false, "Ruta GET no encontrada: $routeString");
         }
@@ -424,7 +437,12 @@ function handleGetQuery($pdo, $fqdn) {
     
     if (!$records) response(404, false, "No hay registros para $fqdn.");
     
-    response(200, true, "Consulta resuelta.", ['fqdn' => $fqdn, 'results' => $records]);
+    response(200, true, "Consulta resuelta.", [
+        'fqdn' => $fqdn, 
+        'zone' => $zDomain, 
+        'name' => $foundName, 
+        'results' => $records
+    ]);
 }
 
 function handleGetZones($pdo) {
