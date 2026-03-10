@@ -101,6 +101,8 @@ try {
             handlePostDelete($pdo, $input);
         } elseif ($routeString === 'record/add') {
             handlePostRecordAdd($pdo, $input);
+        } elseif ($routeString === 'record/edit') {
+            handlePostRecordEdit($pdo, $input);
         } elseif ($routeString === 'record/del') {
             handlePostRecordDel($pdo, $input);
         } else {
@@ -295,6 +297,33 @@ function processSpfUpdate($pdo, $zoneId, $domain, $newContent, $ttl) {
 
     queueZoneUpdate($pdo, $domain);
     response(200, true, "Registro SPF actualizado.");
+}
+
+function handlePostRecordEdit($pdo, $input) {
+    $id = intval($input['id'] ?? 0);
+    $name = trim($input['name'] ?? ''); 
+    $type = strtoupper(trim($input['type'] ?? '')); 
+    $content = trim($input['content'] ?? '');
+    $ttl = intval($input['ttl'] ?? 3600);
+    $priority = isset($input['priority']) ? intval($input['priority']) : null;
+
+    if (!$id || empty($name) || empty($type) || empty($content)) {
+        response(400, false, "Faltan parámetros: id, name, type, content son obligatorios.");
+    }
+
+    // Obtener el dominio para encolar actualización
+    $stmt = $pdo->prepare("SELECT z.domain FROM sys_dns_records r JOIN sys_dns_zones z ON r.zone_id = z.id WHERE r.id = ?");
+    $stmt->execute([$id]);
+    $res = $stmt->fetch();
+    if (!$res) response(404, false, "Registro no encontrado.");
+    $domain = $res['domain'];
+
+    // Actualizar
+    $upStmt = $pdo->prepare("UPDATE sys_dns_records SET name = ?, type = ?, content = ?, ttl = ?, priority = ? WHERE id = ?");
+    $upStmt->execute([$name, $type, $content, $ttl, $priority, $id]);
+
+    queueZoneUpdate($pdo, $domain);
+    response(200, true, "Registro actualizado correctamente.");
 }
 
 function handlePostRecordDel($pdo, $input) {
