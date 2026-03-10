@@ -126,6 +126,8 @@ try {
         } elseif (strpos($routeString, 'verify/') === 0) {
             $domain = substr($routeString, 7);
             handleGetVerify($pdo, $domain);
+        } elseif ($routeString === 'status/pending') {
+            handleGetPendingStatus($pdo);
         } else {
             response(404, false, "Ruta GET no encontrada: $routeString");
         }
@@ -360,6 +362,12 @@ function handlePostRecordDel($pdo, $input) {
     
     queueZoneUpdate($pdo, $domainToUpdate);
     response(200, true, "Registro eliminado correctamente.");
+}
+
+function handleGetPendingStatus($pdo) {
+    $stmt = $pdo->query("SELECT COUNT(*) FROM sys_dns_requests WHERE status IN ('pending', 'processing')");
+    $count = $stmt->fetchColumn();
+    response(200, true, "Tareas pendientes recuperadas.", ['pending_count' => (int)$count]);
 }
 
 function handleGetStatus($pdo, $id) {
