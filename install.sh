@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.1.0)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.0)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -153,7 +153,7 @@ if [ "$UPDATE_MODE" = true ]; then
     printf "${YELLOW}Actualizando sistema...${NC}\n"
     apt upgrade -y
 fi
-apt install -y curl git unzip cron certbot python3-certbot-apache dnsutils ufw
+apt install -y curl git unzip cron certbot python3-certbot-apache dnsutils ufw apache2 php-fpm php-cli php-mysql php-curl php-gd php-mbstring php-xml
 
 # 3.1 Optimización MariaDB (Low Memory Profile)
 if ! command -v mariadb >/dev/null 2>&1; then
@@ -207,7 +207,7 @@ if [ "$HAS_LWH" = false ]; then
     mkdir -p "$ADMIN_PATH"
     cat <<EOF > "$CONFIG_FILE"
 <?php
-define('DB_HOST', 'localhost');
+define('DB_HOST', '127.0.0.1');
 define('DB_NAME', '$DB_NAME');
 define('DB_USER', '$DB_USER');
 define('DB_PASS', '$DB_PASS');
@@ -263,12 +263,10 @@ if [ "$HAS_LWH" = true ]; then
 fi
 
 # 3.2 Optimización Web (Apache2 + PHP-FPM)
-if ! command -v apache2 >/dev/null 2>&1; then
-    printf "${YELLOW}Instalando Apache2 y PHP-FPM (MPM Event)...${NC}\n"
-    apt install -y apache2 php-fpm php-cli php-mysql php-curl php-gd php-mbstring php-xml
-    
-    # Configurar MPM Event para bajo consumo (1GB RAM)
-    cat <<EOF > /etc/apache2/mods-available/mpm_event.conf
+printf "${YELLOW}Configurando Apache2 y PHP-FPM (MPM Event)...${NC}\n"
+
+# Configurar MPM Event para bajo consumo (1GB RAM)
+cat <<EOF > /etc/apache2/mods-available/mpm_event.conf
 <IfModule mpm_event_module>
     StartServers             1
     MinSpareThreads          5
@@ -279,28 +277,27 @@ if ! command -v apache2 >/dev/null 2>&1; then
     MaxConnectionsPerChild   1000
 </IfModule>
 EOF
-    
-    # Activar módulos esenciales
-    a2dismod mpm_prefork 2>/dev/null || true
-    a2enmod mpm_event proxy_fcgi setenvif rewrite ssl http2
-    
-    # Optimizar PHP-FPM (Modo OnDemand)
-    PHP_VER=$(ls /etc/php/ | grep -E '^[0-9.]+$' | head -n 1)
-    if [ ! -z "$PHP_VER" ]; then
-        POOL_FILE="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
-        if [ -f "$POOL_FILE" ]; then
-            sed -i 's/^pm = dynamic/pm = ondemand/' $POOL_FILE
-            sed -i 's/^pm.max_children = 5/pm.max_children = 10/' $POOL_FILE
-            sed -i 's/^;pm.process_idle_timeout = 10s;/pm.process_idle_timeout = 30s;/' $POOL_FILE
-        fi
-        systemctl restart php${PHP_VER}-fpm
+
+# Activar módulos esenciales
+a2dismod mpm_prefork 2>/dev/null || true
+a2enmod mpm_event proxy_fcgi setenvif rewrite ssl http2
+
+# Optimizar PHP-FPM (Modo OnDemand)
+PHP_VER=$(ls /etc/php/ | grep -E '^[0-9.]+$' | head -n 1)
+if [ ! -z "$PHP_VER" ]; then
+    POOL_FILE="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
+    if [ -f "$POOL_FILE" ]; then
+        sed -i 's/^pm = dynamic/pm = ondemand/' $POOL_FILE
+        sed -i 's/^pm.max_children = 5/pm.max_children = 10/' $POOL_FILE
+        sed -i 's/^;pm.process_idle_timeout = 10s;/pm.process_idle_timeout = 30s;/' $POOL_FILE
     fi
-    
-    systemctl restart apache2
+    systemctl restart php${PHP_VER}-fpm
 fi
 
+systemctl restart apache2
+
 # 3.3 Configurar VirtualHost para DNS API (Puerto 8080)
-if [ ! -f /etc/apache2/sites-available/dns-api.conf ]; then
+if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true ]; then
     printf "${YELLOW}Configurando Apache en Puerto 8080 para DNS API...${NC}\n"
     
     # Asegurar que Apache escucha en el puerto 8080
@@ -309,12 +306,14 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ]; then
     fi
 
     # Detección del socket de PHP
-    REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
+    REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1 | sed 's/\//\\\//g')
+    [ -z "$REAL_PHP_SOCKET" ] && REAL_PHP_SOCKET="\/run\/php\/php-fpm.sock"
     
     cat <<EOF > /etc/apache2/sites-available/dns-api.conf
 <VirtualHost *:8080>
     DocumentRoot /var/www
     DirectoryIndex index.php
+    CGIPassAuth On
 
     <Directory /var/www/api-dns>
         Options -Indexes +FollowSymLinks
@@ -336,8 +335,11 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ]; then
 </VirtualHost>
 EOF
 
+    # Resolver las barras escapadas del sed si se usó cat (en este bash script el cat es literal)
+    sed -i "s|\\\\/|/|g" /etc/apache2/sites-available/dns-api.conf
+
     a2ensite dns-api.conf
-    systemctl restart apache2
+    systemctl reload apache2
 fi
 
 # 4. Instalación del Servidor DNS (BIND9)
