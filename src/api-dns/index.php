@@ -31,8 +31,24 @@ if (file_exists($configFile)) {
 
 $pdo = getPDO();
 
-$headers = getallheaders();
-$authHeader = isset($headers['Authorization']) ? $headers['Authorization'] : '';
+// Buscar cabecera de autorización de forma robusta
+$authHeader = '';
+if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+} elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+    $authHeader = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+} elseif (isset($_SERVER['Redirect_HTTP_AUTHORIZATION'])) {
+    $authHeader = $_SERVER['Redirect_HTTP_AUTHORIZATION'];
+} elseif (function_exists('getallheaders')) {
+    $headers = getallheaders();
+    foreach ($headers as $key => $value) {
+        if (strcasecmp($key, 'Authorization') === 0) {
+            $authHeader = $value;
+            break;
+        }
+    }
+}
+
 $providedToken = '';
 
 if (strpos($authHeader, 'Bearer ') === 0) {

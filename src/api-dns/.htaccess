@@ -1,4 +1,10 @@
 RewriteEngine On
+CGIPassAuth On
+
+# Pasar cabecera de Autorización a PHP (Solución adicional para Apache + PHP-FPM)
+RewriteCond %{HTTP:Authorization} ^(.*)
+RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ index.php [QSA,L]
