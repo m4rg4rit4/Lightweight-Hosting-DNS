@@ -313,12 +313,12 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true
 <VirtualHost *:8080>
     DocumentRoot /var/www
     DirectoryIndex index.php
-    CGIPassAuth On
 
     <Directory /var/www/api-dns>
         Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
+        CGIPassAuth On
         <FilesMatch \.php$>
             SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
         </FilesMatch>
@@ -328,6 +328,7 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true
         Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
+        CGIPassAuth On
         <FilesMatch \.php$>
             SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
         </FilesMatch>
