@@ -157,8 +157,12 @@ function handlePostAdd($pdo, $input) {
     $domain = trim($input['domain'] ?? '');
     $ip = trim($input['ip'] ?? '');
 
-    if (empty($domain) || empty($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
-        response(400, false, "Parámetros inválidos. Se requiere 'domain' e 'ip' válida.");
+    if (empty($domain)) {
+        response(400, false, "Parámetros inválidos. Se requiere 'domain'.");
+    }
+
+    if (!empty($ip) && !filter_var($ip, FILTER_VALIDATE_IP)) {
+        response(400, false, "La IP proporcionada no es válida.");
     }
 
     // Comprobar si ya existe
@@ -179,8 +183,10 @@ function handlePostAdd($pdo, $input) {
     $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'NS', ?)");
     $stmt->execute([$zoneId, $ns1 . "."]);
 
-    $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'A', ?)");
-    $stmt->execute([$zoneId, $ip]);
+    if (!empty($ip)) {
+        $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'A', ?)");
+        $stmt->execute([$zoneId, $ip]);
+    }
 
     // Encolar generación de zona
     queueZoneUpdate($pdo, $domain);
