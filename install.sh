@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.0)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.1)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {

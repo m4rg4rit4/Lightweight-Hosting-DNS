@@ -32,6 +32,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = "El nombre del cliente no puede estar vacío.";
             $messageType = 'danger';
         }
+    } elseif ($action === 'edit') {
+        $tokenId = intval($_POST['token_id'] ?? 0);
+        $clientName = trim($_POST['client_name'] ?? '');
+        $tokenValue = trim($_POST['token_value'] ?? '');
+        
+        if ($tokenId > 0 && !empty($clientName) && !empty($tokenValue)) {
+            try {
+                $stmt = $pdo->prepare("UPDATE sys_dns_tokens SET client_name = ?, token = ? WHERE id = ?");
+                $stmt->execute([$clientName, $tokenValue, $tokenId]);
+                $message = "Token actualizado con éxito.";
+            } catch (Exception $e) {
+                $message = "Error al actualizar el token: " . $e->getMessage();
+                $messageType = 'danger';
+            }
+        } else {
+            $message = "Todos los campos son obligatorios para la edición.";
+            $messageType = 'danger';
+        }
     } elseif ($action === 'delete') {
         $tokenId = intval($_POST['token_id'] ?? 0);
         if ($tokenId > 0) {
@@ -161,6 +179,12 @@ $tokens = $stmt->fetchAll();
                                                 <?php endif; ?>
                                             </form>
                                             
+                                            <!-- Editar -->
+                                            <button type="button" class="btn btn-sm btn-outline-info" title="Editar" 
+                                                    onclick="editToken(<?= $t['id'] ?>, '<?= htmlspecialchars(addslashes($t['client_name'])) ?>', '<?= htmlspecialchars(addslashes($t['token'])) ?>')">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            
                                             <!-- Borrar -->
                                             <form method="POST" class="d-inline" onsubmit="return confirm('¿Estás seguro de que quieres eliminar este token definitivamente? Las aplicaciones que lo usen fallarán.');">
                                                 <input type="hidden" name="action" value="delete">
@@ -180,6 +204,61 @@ $tokens = $stmt->fetchAll();
     </div>
 </div>
 
+<!-- Modal de Edición -->
+<div class="modal fade" id="editTokenModal" tabindex="-1" aria-labelledby="editTokenModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="editTokenModalLabel"><i class="bi bi-pencil-square"></i> Editar Token DNS</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="token_id" id="edit_token_id">
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Nombre del Cliente / Servidor</label>
+                        <input type="text" name="client_name" id="edit_client_name" class="form-control bg-dark text-light border-secondary" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Valor del Token (API Key)</label>
+                        <div class="input-group">
+                            <input type="text" name="token_value" id="edit_token_value" class="form-control bg-dark text-light border-secondary font-monospace" required>
+                            <button class="btn btn-outline-secondary" type="button" onclick="generateToken('edit_token_value')"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                        <small class="text-muted">Puedes pegar aquí un token de otro servidor para sincronizarlos.</small>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function editToken(id, client, token) {
+    document.getElementById('edit_token_id').value = id;
+    document.getElementById('edit_client_name').value = client;
+    document.getElementById('edit_token_value').value = token;
+    
+    var editModal = new bootstrap.Modal(document.getElementById('editTokenModal'));
+    editModal.show();
+}
+
+function generateToken(inputId) {
+    const chars = 'abcdef0123456789';
+    let result = '';
+    for (let i = 0; i < 32; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    document.getElementById(inputId).value = result;
+}
+</script>
 </body>
 </html>
