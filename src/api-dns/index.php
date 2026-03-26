@@ -265,6 +265,13 @@ function handlePostRecordAdd($pdo, $input) {
         }
     }
 
+    // Evitar duplicados exactos
+    $stmt = $pdo->prepare("SELECT id FROM sys_dns_records WHERE zone_id = ? AND name = ? AND type = ? AND content = ?");
+    $stmt->execute([$zoneId, $name, $type, $content]);
+    if ($stmt->fetch()) {
+        response(200, true, "El registro ya existe.");
+    }
+
     // Lógica especial SPF
     if ($type === 'TXT' && $name === '@' && strpos($content, 'v=spf1') === 0) {
         processSpfUpdate($pdo, $zoneId, $domain, $content, $ttl);
