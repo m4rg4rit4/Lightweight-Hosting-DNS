@@ -473,7 +473,7 @@ function handleGetZones($pdo) {
 
 function handleGetZoneExport($pdo, $domain) {
     // Obtener la zona
-    $stmt = $pdo->prepare("SELECT id FROM sys_dns_zones WHERE domain = ?");
+    $stmt = $pdo->prepare("SELECT id, updated_at FROM sys_dns_zones WHERE domain = ?");
     $stmt->execute([$domain]);
     $zone = $stmt->fetch();
     
@@ -486,10 +486,11 @@ function handleGetZoneExport($pdo, $domain) {
     $stmt->execute([$zone['id']]);
     $records = $stmt->fetchAll();
 
-    // Generar formato BIND usando la plantilla si está disponible localmente, sino manualmente
+    // Generar formato BIND usando la plantilla
     $templateFile = __DIR__ . '/../engine/template.zone.php';
-    $serial = date('Ymd') . '01'; 
     
+    // Serial dinámico basado en la fecha de actualización (Epoch) para asegurar incremento
+    $serial = strtotime($zone['updated_at'] ?? 'now');
     header('Content-Type: text/plain; charset=utf-8');
     if (file_exists($templateFile)) {
         include $templateFile;
