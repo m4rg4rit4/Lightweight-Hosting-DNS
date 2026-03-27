@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.5)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.6)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -299,20 +299,23 @@ systemctl restart apache2
 # 3.3 Configurar VirtualHost para DNS API (Puerto 8090 con SSL si es posible)
 if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true ]; then
     printf "${YELLOW}Verificando conectividad para certificado SSL...${NC}\n"
-    
+
     # Obtener IP pública del servidor
-    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
-    # Obtener IP a la que apunta el dominio (usar multiple métodos)
-    FQDN_IP=$(getent hosts "$FULL_FQDN" | awk '{print $1}')
-    [ -z "$FQDN_IP" ] && FQDN_IP=$(dig +short "$FULL_FQDN" | tail -n1)
-    
+    PUBLIC_IP=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ifconfig.me 2>/dev/null)
+    # Resolver el dominio SIEMPRE via DNS externo (8.8.8.8) para ignorar /etc/hosts
+    FQDN_IP=$(dig @8.8.8.8 +short "$FULL_FQDN" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1)
+
     printf "${YELLOW}Diagnóstico DNS:${NC}\n"
     printf "  - FQDN configurado: $FULL_FQDN\n"
     printf "  - IP Pública detectada: $PUBLIC_IP\n"
-    printf "  - IP que resuelve el dominio: $FQDN_IP\n"
+    printf "  - IP que resuelve el dominio (DNS externo): $FQDN_IP\n"
 
+    # Reutilizar certificado existente si ya fue generado previamente
     USE_SSL=false
-    if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
+    if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
+        printf "${GREEN}Certificado SSL existente encontrado. Reutilizando...${NC}\n"
+        USE_SSL=true
+    elif [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
         printf "${GREEN}El dominio $FULL_FQDN apunta correctamente a $PUBLIC_IP. Generando certificado SSL...${NC}\n"
 
         # Asegurar que Apache escucha en puerto 80
