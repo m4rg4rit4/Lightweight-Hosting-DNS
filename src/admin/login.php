@@ -1,6 +1,9 @@
 <?php
 /**
  * Lightweight-Hosting Login Page
+ * 
+ * NOTA: Este archivo debe ser IDENTICO al de Lightweight-Hosting/src/admin/login.php.
+ * Si se modifica uno, debe actualizarse el otro para mantener la compatibilidad.
  */
 
 if (session_status() === PHP_SESSION_NONE) {
