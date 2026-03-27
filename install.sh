@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.7)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.8)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -332,7 +332,7 @@ elif [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
         echo "Listen 80" >> /etc/apache2/ports.conf
     fi
 
-    # VirtualHost mínimo en puerto 80 solo para el reto ACME (API no expuesta en 80)
+    # VirtualHost mínimo en puerto 80 para el reto ACME (DocumentRoot aislado)
     ACME_WEBROOT="/var/www/acme-challenge"
     mkdir -p "$ACME_WEBROOT"
     cat > /etc/apache2/sites-available/dns-api-http.conf <<APACHEEOF
@@ -344,12 +344,6 @@ elif [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
         AllowOverride None
         Require all granted
     </Directory>
-    <Location />
-        Require all denied
-    </Location>
-    <Location /.well-known/acme-challenge/>
-        Require all granted
-    </Location>
 </VirtualHost>
 APACHEEOF
     a2ensite dns-api-http.conf
