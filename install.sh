@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.9)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.10)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -428,6 +428,8 @@ else
     </Directory>
 </VirtualHost>
 EOF
+fi
+
 a2ensite dns-api.conf
 systemctl reload apache2
 
