@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.1)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.2)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -296,21 +296,75 @@ fi
 
 systemctl restart apache2
 
-# 3.3 Configurar VirtualHost para DNS API (Puerto 8080)
+# 3.3 Configurar VirtualHost para DNS API (Puerto 8090 con SSL si es posible)
 if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true ]; then
-    printf "${YELLOW}Configurando Apache en Puerto 8080 para DNS API...${NC}\n"
+    printf "${YELLOW}Verificando conectividad para certificado SSL...${NC}\n"
     
-    # Asegurar que Apache escucha en el puerto 8080
-    if ! grep -q "Listen 8080" /etc/apache2/ports.conf; then
-        echo "Listen 8080" >> /etc/apache2/ports.conf
+    # Obtener IP pública del servidor
+    PUBLIC_IP=$(curl -s https://ifconfig.me)
+    # Obtener IP a la que apunta el dominio
+    FQDN_IP=$(dig +short "$FULL_FQDN" | tail -n1)
+    
+    USE_SSL=false
+    if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
+        printf "${GREEN}El dominio $FULL_FQDN apunta correctamente a $PUBLIC_IP. Solicitando certificado...${NC}\n"
+        certbot certonly --apache -d "$FULL_FQDN" --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL"
+        if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
+            USE_SSL=true
+            printf "${GREEN}Certificado SSL generado correctamente.${NC}\n"
+        else
+            printf "${RED}Error: No se pudo generar el certificado SSL.${NC}\n"
+        fi
+    else
+        printf "${YELLOW}Advertencia: el dominio $FULL_FQDN no apunta a la IP de este servidor ($PUBLIC_IP vs $FQDN_IP).${NC}\n"
+        printf "${YELLOW}Se configurará el puerto 8090 sin cifrado SSL.${NC}\n"
+    fi
+
+    # Asegurar que Apache escucha en el puerto 8090
+    if ! grep -q "Listen 8090" /etc/apache2/ports.conf; then
+        echo "Listen 8090" >> /etc/apache2/ports.conf
     fi
 
     # Detección del socket de PHP
     REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1 | sed 's/\//\\\//g')
     [ -z "$REAL_PHP_SOCKET" ] && REAL_PHP_SOCKET="\/run\/php\/php-fpm.sock"
     
-    cat <<EOF > /etc/apache2/sites-available/dns-api.conf
-<VirtualHost *:8080>
+    # Generar configuración según disponibilidad de SSL
+    if [ "$USE_SSL" = true ]; then
+        cat <<EOF > /etc/apache2/sites-available/dns-api.conf
+<VirtualHost *:8090>
+    ServerName $FULL_FQDN
+    DocumentRoot /var/www
+    DirectoryIndex index.php
+
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/$FULL_FQDN/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/$FULL_FQDN/privkey.pem
+
+    <Directory /var/www/api-dns>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+        CGIPassAuth On
+        <FilesMatch \.php$>
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
+        </FilesMatch>
+    </Directory>
+
+    <Directory /var/www/admin_panel>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+        CGIPassAuth On
+        <FilesMatch \.php$>
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
+        </FilesMatch>
+    </Directory>
+</VirtualHost>
+EOF
+    else
+        cat <<EOF > /etc/apache2/sites-available/dns-api.conf
+<VirtualHost *:8090>
     DocumentRoot /var/www
     DirectoryIndex index.php
 
@@ -335,9 +389,15 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true
     </Directory>
 </VirtualHost>
 EOF
+    fi
 
-    # Resolver las barras escapadas del sed si se usó cat (en este bash script el cat es literal)
+    # Resolver las barras escapadas del sed si se usó cat
     sed -i "s|\\\\/|/|g" /etc/apache2/sites-available/dns-api.conf
+
+    # Abrir puerto en el firewall si está activo
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow 8090/tcp
+    fi
 
     a2ensite dns-api.conf
     systemctl reload apache2
