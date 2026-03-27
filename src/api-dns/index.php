@@ -105,6 +105,8 @@ try {
             handlePostRecordEdit($pdo, $input);
         } elseif ($routeString === 'record/del') {
             handlePostRecordDel($pdo, $input);
+        } elseif ($routeString === 'record/reorder') {
+            handlePostRecordReorder($pdo, $input);
         } else {
             response(404, false, "Ruta POST no encontrada: $routeString");
         }
@@ -138,7 +140,8 @@ try {
                     'POST /api-dns/add' => 'Add a new authoritative zone',
                     'POST /api-dns/record/add' => 'Add a DNS record',
                     'POST /api-dns/record/edit' => 'Edit a DNS record',
-                    'POST /api-dns/record/del' => 'Delete a DNS record'
+                    'POST /api-dns/record/del' => 'Delete a DNS record',
+                    'POST /api-dns/record/reorder' => 'Reorder DNS records'
                 ]
             ]);
         } else {
@@ -276,9 +279,13 @@ function handlePostRecordAdd($pdo, $input) {
     if ($type === 'TXT' && $name === '@' && strpos($content, 'v=spf1') === 0) {
         processSpfUpdate($pdo, $zoneId, $domain, $content, $ttl);
     } else {
-        // Inserción normal
-        $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content, ttl, priority) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$zoneId, $name, $type, $content, $ttl, $priority]);
+        // Inserción normal con sort_order máximo
+        $stmtMax = $pdo->prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sys_dns_records WHERE zone_id = ?");
+        $stmtMax->execute([$zoneId]);
+        $nextSortOrder = $stmtMax->fetchColumn();
+
+        $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content, ttl, priority, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$zoneId, $name, $type, $content, $ttl, $priority, $nextSortOrder]);
         
         queueZoneUpdate($pdo, $domain);
         response(200, true, "Registro $type añadido a $domain$warning.");
@@ -390,6 +397,37 @@ function handlePostRecordDel($pdo, $input) {
     response(200, true, "Registro eliminado correctamente.");
 }
 
+function handlePostRecordReorder($pdo, $input) {
+    $ids = $input['ids'] ?? []; // Array de IDs en el orden deseado
+    
+    if (empty($ids) || !is_array($ids)) {
+        response(400, false, "Se requiere un array de IDs en el parámetro 'ids'.");
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("UPDATE sys_dns_records SET sort_order = ? WHERE id = ?");
+        foreach ($ids as $index => $id) {
+            $stmt->execute([$index, (int)$id]);
+        }
+        
+        // Obtener dominio para encolar actualización de BIND
+        $stmtDomain = $pdo->prepare("SELECT z.domain FROM sys_dns_records r JOIN sys_dns_zones z ON r.zone_id = z.id WHERE r.id = ?");
+        $stmtDomain->execute([(int)$ids[0]]);
+        $domain = $stmtDomain->fetchColumn();
+        
+        if ($domain) {
+            queueZoneUpdate($pdo, $domain);
+        }
+        
+        $pdo->commit();
+        response(200, true, "Orden de registros actualizado correctamente.");
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        response(500, false, "Error al reordenar registros: " . $e->getMessage());
+    }
+}
+
 function handleGetPendingStatus($pdo) {
     $stmt = $pdo->query("SELECT COUNT(*) FROM sys_dns_requests WHERE status IN ('pending', 'processing')");
     $count = $stmt->fetchColumn();
@@ -407,10 +445,11 @@ function handleGetStatus($pdo, $id) {
 
 function handleGetRecords($pdo, $domain) {
     $stmt = $pdo->prepare("
-        SELECT r.id, r.name, r.type, r.content, r.ttl, r.priority 
+        SELECT r.id, r.name, r.type, r.content, r.ttl, r.priority, r.sort_order
         FROM sys_dns_records r 
         JOIN sys_dns_zones z ON r.zone_id = z.id 
         WHERE z.domain = ?
+        ORDER BY r.sort_order ASC, r.id ASC
     ");
     $stmt->execute([$domain]);
     $records = $stmt->fetchAll();
@@ -482,7 +521,8 @@ function handleGetZoneExport($pdo, $domain) {
     }
 
     // Obtener registros
-    $stmt = $pdo->prepare("SELECT name, type, content, ttl, priority FROM sys_dns_records WHERE zone_id = ? ORDER BY type='SOA' DESC, type='NS' DESC, name ASC");
+    // Obtener registros ordenados por sort_order (para exportación BIND fiel al Panel)
+    $stmt = $pdo->prepare("SELECT name, type, content, ttl, priority FROM sys_dns_records WHERE zone_id = ? ORDER BY sort_order ASC, id ASC");
     $stmt->execute([$zone['id']]);
     $records = $stmt->fetchAll();
 
