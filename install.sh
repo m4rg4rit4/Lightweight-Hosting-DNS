@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.10)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.11)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -310,9 +310,12 @@ printf "  - FQDN: $FULL_FQDN\n"
 printf "  - IP del servidor: $PUBLIC_IP\n"
 printf "  - IP DNS externo:  $FQDN_IP\n"
 
-# Asegurar que Apache escucha en 8090
+# Asegurar que Apache escucha en 8090 y 443
 if ! grep -q "Listen 8090" /etc/apache2/ports.conf; then
     echo "Listen 8090" >> /etc/apache2/ports.conf
+fi
+if ! grep -q "Listen 443" /etc/apache2/ports.conf; then
+    echo "Listen 443" >> /etc/apache2/ports.conf
 fi
 
 # Detección del socket de PHP
@@ -370,6 +373,7 @@ fi
 
 # Generar configuración Apache según disponibilidad de SSL
 if [ "$USE_SSL" = true ]; then
+    [ -z "$WEBROOT_DEFAULT" ] && WEBROOT_DEFAULT="/var/www/html"
     cat > /etc/apache2/sites-available/dns-api.conf <<EOF
 <VirtualHost *:8090>
     ServerName $FULL_FQDN
@@ -379,6 +383,11 @@ if [ "$USE_SSL" = true ]; then
     SSLEngine on
     SSLCertificateFile /etc/letsencrypt/live/$FULL_FQDN/fullchain.pem
     SSLCertificateKeyFile /etc/letsencrypt/live/$FULL_FQDN/privkey.pem
+
+    # Evitar listado de directorios en el root de la API
+    <Directory /var/www>
+        Options -Indexes
+    </Directory>
 
     <Directory /var/www/api-dns>
         Options -Indexes +FollowSymLinks
@@ -400,12 +409,31 @@ if [ "$USE_SSL" = true ]; then
         </FilesMatch>
     </Directory>
 </VirtualHost>
+
+# VirtualHost para puerto 443 (espejo del puerto 80 con SSL)
+<VirtualHost *:443>
+    ServerName $FULL_FQDN
+    DocumentRoot $WEBROOT_DEFAULT
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/$FULL_FQDN/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/$FULL_FQDN/privkey.pem
+    <Directory $WEBROOT_DEFAULT>
+        Options +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
 EOF
 else
     cat > /etc/apache2/sites-available/dns-api.conf <<EOF
 <VirtualHost *:8090>
     DocumentRoot /var/www
     DirectoryIndex index.php
+
+    # Evitar listado de directorios en el root de la API
+    <Directory /var/www>
+        Options -Indexes
+    </Directory>
 
     <Directory /var/www/api-dns>
         Options -Indexes +FollowSymLinks
