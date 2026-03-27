@@ -8,6 +8,9 @@ if (!file_exists($configFile)) {
 }
 require_once $configFile;
 
+require_once __DIR__ . '/auth.php';
+checkAuth();
+
 $pdo = getPDO();
 $message = '';
 $messageType = 'success';

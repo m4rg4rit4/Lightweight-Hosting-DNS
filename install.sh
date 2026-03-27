@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.11)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.12)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -82,6 +82,8 @@ if [ -f "$CONFIG_FILE" ]; then
     DB_USER=$(get_php_const "DB_USER" "$CONFIG_FILE")
     DB_NAME=$(get_php_const "DB_NAME" "$CONFIG_FILE")
     ADMIN_EMAIL=$(get_php_const "ADMIN_EMAIL" "$CONFIG_FILE")
+    ADMIN_USER=$(get_php_const "ADMIN_USER" "$CONFIG_FILE")
+    ADMIN_PASS=$(get_php_const "ADMIN_PASS" "$CONFIG_FILE")
     
     # Intentar recuperar constantes específicas si ya existen
     DNS_HOSTNAME=$(get_php_const "DNS_HOSTNAME" "$CONFIG_FILE")
@@ -92,6 +94,8 @@ if [ -f "$CONFIG_FILE" ]; then
     DB_USER=$(sanitize_var "$DB_USER")
     DB_NAME=$(sanitize_var "$DB_NAME")
     ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
+    ADMIN_USER=$(sanitize_var "$ADMIN_USER")
+    ADMIN_PASS=$(sanitize_var "$ADMIN_PASS")
     DNS_HOSTNAME=$(sanitize_var "$DNS_HOSTNAME")
     DNS_DOMAIN=$(sanitize_var "$DNS_DOMAIN")
     
@@ -103,6 +107,8 @@ else
     DB_NAME="dbadmin"
     DB_PASS=$(openssl rand -base64 18)
     ADMIN_EMAIL=""
+    ADMIN_USER="admin"
+    ADMIN_PASS=$(openssl rand -base64 12)
 fi
 
 # Preparar sugerencias inteligentes para los prompts (siempre preguntar)
@@ -144,6 +150,16 @@ ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
 # Sincronizar constantes de email
 DNS_ADMIN_EMAIL=$ADMIN_EMAIL
 LETSENCRYPT_EMAIL=$ADMIN_EMAIL
+
+# Configuración de Credenciales del Panel (siempre preguntar)
+DEFAULT_USER=${ADMIN_USER:-"admin"}
+ask_input "4. Introduce el USUARIO de administración [$DEFAULT_USER]: " "$DEFAULT_USER" "ADMIN_USER"
+ADMIN_USER=$(sanitize_var "$ADMIN_USER")
+
+DEFAULT_PASS=${ADMIN_PASS:-$(openssl rand -base64 12)}
+ask_input "5. Introduce la CONTRASEÑA de administración [$DEFAULT_PASS]: " "$DEFAULT_PASS" "ADMIN_PASS"
+ADMIN_PASS=$(sanitize_var "$ADMIN_PASS")
+
 printf "\n"
 
 # 3. Instalación de paquetes y optimización de recursos (Target: 1GB RAM)
@@ -212,6 +228,8 @@ define('DB_NAME', '$DB_NAME');
 define('DB_USER', '$DB_USER');
 define('DB_PASS', '$DB_PASS');
 define('ADMIN_EMAIL', '$ADMIN_EMAIL');
+define('ADMIN_USER', '$ADMIN_USER');
+define('ADMIN_PASS', '$ADMIN_PASS');
 define('DNS_HOSTNAME', '$DNS_HOSTNAME');
 define('DNS_DOMAIN', '$DNS_DOMAIN');
 define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
@@ -259,6 +277,8 @@ if [ "$HAS_LWH" = true ]; then
     update_php_const "DNS_DOMAIN" "$DNS_DOMAIN"
     update_php_const "DNS_ADMIN_EMAIL" "$DNS_ADMIN_EMAIL"
     update_php_const "LETSENCRYPT_EMAIL" "$LETSENCRYPT_EMAIL"
+    update_php_const "ADMIN_USER" "$ADMIN_USER"
+    update_php_const "ADMIN_PASS" "$ADMIN_PASS"
     update_php_const "DNS_INSTALLED" "true"
 fi
 
@@ -546,6 +566,8 @@ REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting-DNS/ma
 curl -sSL "$REPO_RAW/src/admin/dns_tokens.php" -o "$TEMP_DIR/dns_tokens.php"
 curl -sSL "$REPO_RAW/src/api-dns/index.php" -o "$TEMP_DIR/index.php"
 curl -sSL "$REPO_RAW/src/api-dns/.htaccess" -o "$TEMP_DIR/.htaccess"
+curl -sSL "$REPO_RAW/src/admin/auth.php" -o "$TEMP_DIR/auth.php"
+curl -sSL "$REPO_RAW/src/admin/login.php" -o "$TEMP_DIR/login.php"
 curl -sSL "$REPO_RAW/src/engine/sync_dns.php" -o "$TEMP_DIR/sync_dns.php"
 curl -sSL "$REPO_RAW/src/engine/template.zone.php" -o "$TEMP_DIR/template.zone.php"
 
@@ -557,6 +579,8 @@ fi
 
 # Mover archivos a su destino final
 cp "$TEMP_DIR/dns_tokens.php" "$ADMIN_PATH/dns_tokens.php"
+cp "$TEMP_DIR/auth.php" "$ADMIN_PATH/auth.php"
+cp "$TEMP_DIR/login.php" "$ADMIN_PATH/login.php"
 cp "$TEMP_DIR/index.php" "$API_PATH/index.php"
 cp "$TEMP_DIR/.htaccess" "$API_PATH/.htaccess"
 cp "$TEMP_DIR/sync_dns.php" "$ENGINE_PATH/sync_dns.php"
@@ -564,7 +588,7 @@ cp "$TEMP_DIR/template.zone.php" "$ENGINE_PATH/template.zone.php"
 
 # Permisos y limpieza
 chown -R www-data:www-data "$ADMIN_PATH" "$API_PATH"
-chmod 644 "$ADMIN_PATH/dns_tokens.php" "$API_PATH/index.php" "$API_PATH/.htaccess" "$ENGINE_PATH/template.zone.php"
+chmod 644 "$ADMIN_PATH/dns_tokens.php" "$ADMIN_PATH/auth.php" "$ADMIN_PATH/login.php" "$API_PATH/index.php" "$API_PATH/.htaccess" "$ENGINE_PATH/template.zone.php"
 chmod 700 "$ENGINE_PATH/sync_dns.php"
 rm -rf "$TEMP_DIR"
 
