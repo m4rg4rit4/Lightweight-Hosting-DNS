@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.8)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.9)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -332,16 +332,18 @@ elif [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
         echo "Listen 80" >> /etc/apache2/ports.conf
     fi
 
-    # VirtualHost mínimo en puerto 80 para el reto ACME (DocumentRoot aislado)
-    ACME_WEBROOT="/var/www/acme-challenge"
-    mkdir -p "$ACME_WEBROOT"
+    # VirtualHost estándar en puerto 80 para el reto ACME y compatibilidad
+    WEBROOT_DEFAULT="/var/www/html"
+    mkdir -p "$WEBROOT_DEFAULT"
+    echo "<h1>Servidor DNS</h1>" > "$WEBROOT_DEFAULT/index.html"
+    
     cat > /etc/apache2/sites-available/dns-api-http.conf <<APACHEEOF
 <VirtualHost *:80>
     ServerName $FULL_FQDN
-    DocumentRoot $ACME_WEBROOT
-    <Directory $ACME_WEBROOT>
-        Options -Indexes
-        AllowOverride None
+    DocumentRoot $WEBROOT_DEFAULT
+    <Directory $WEBROOT_DEFAULT>
+        Options +FollowSymLinks
+        AllowOverride All
         Require all granted
     </Directory>
 </VirtualHost>
@@ -350,7 +352,7 @@ APACHEEOF
     systemctl reload apache2
 
     # Solicitar certificado via webroot
-    certbot certonly --webroot -w "$ACME_WEBROOT" -d "$FULL_FQDN" \
+    certbot certonly --webroot -w "$WEBROOT_DEFAULT" -d "$FULL_FQDN" \
         --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL" \
         --keep-until-expiring
 
