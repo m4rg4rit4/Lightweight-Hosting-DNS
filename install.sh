@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.3)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.4)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -313,25 +313,46 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true
 
     USE_SSL=false
     if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
-        printf "${GREEN}El dominio $FULL_FQDN apunta correctamente a $PUBLIC_IP. Solicitando certificado...${NC}\n"
-        
-        # Asegurar vhost en puerto 80 para el reto ACME
-        if [ ! -f /etc/apache2/sites-available/000-default.conf ]; then
-            printf "127.0.0.1 localhost\n" > /etc/hosts # Asegurar localhost para Apache
-            echo "ServerName $FULL_FQDN" > /etc/apache2/conf-available/servername.conf
-            a2enconf servername.conf
-        fi
+        printf "${GREEN}El dominio $FULL_FQDN apunta correctamente a $PUBLIC_IP. Generando certificado SSL...${NC}\n"
 
-        # Intentar generar certificado
-        certbot certonly --apache -d "$FULL_FQDN" --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL"
-        
+        # Crear VirtualHost temporal en puerto 80 para que Certbot puede completar el reto HTTP-01
+        ACME_WEBROOT="/var/www/api-dns"
+        mkdir -p "$ACME_WEBROOT"
+        # Asegurar que Apache escucha en puerto 80
+        if ! grep -q "Listen 80" /etc/apache2/ports.conf; then
+            echo "Listen 80" >> /etc/apache2/ports.conf
+        fi
+        cat > /etc/apache2/sites-available/certbot-temp.conf <<APACHEEOF
+<VirtualHost *:80>
+    ServerName $FULL_FQDN
+    DocumentRoot $ACME_WEBROOT
+    <Directory $ACME_WEBROOT>
+        Options -Indexes
+        AllowOverride None
+        Require all granted
+    </Directory>
+</VirtualHost>
+APACHEEOF
+        a2ensite certbot-temp.conf
+        systemctl reload apache2
+
+        # Solicitar certificado con webroot (más fiable que --apache en entornos no estándar)
+        certbot certonly --webroot -w "$ACME_WEBROOT" -d "$FULL_FQDN" \
+            --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL" \
+            --keep-until-expiring
+
+        # Limpiar VirtualHost temporal
+        a2dissite certbot-temp.conf
+        rm -f /etc/apache2/sites-available/certbot-temp.conf
+        systemctl reload apache2
+
         if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
             USE_SSL=true
             printf "${GREEN}Certificado SSL generado correctamente.${NC}\n"
         else
             printf "${RED}Error: certbot no pudo generar el certificado SSL.${NC}\n"
-            printf "${YELLOW}Revisando logs de certbot...${NC}\n"
-            tail -n 20 /var/log/letsencrypt/letsencrypt.log | sed 's/^/  /'
+            printf "${YELLOW}Últimas líneas del log de certbot:${NC}\n"
+            tail -n 25 /var/log/letsencrypt/letsencrypt.log | sed 's/^/  /'
         fi
     else
         printf "${YELLOW}Advertencia: el dominio $FULL_FQDN no apunta a la IP de este servidor ($PUBLIC_IP vs $FQDN_IP).${NC}\n"
