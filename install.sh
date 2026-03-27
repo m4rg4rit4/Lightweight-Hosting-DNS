@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.4)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.5)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -315,36 +315,41 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true
     if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
         printf "${GREEN}El dominio $FULL_FQDN apunta correctamente a $PUBLIC_IP. Generando certificado SSL...${NC}\n"
 
-        # Crear VirtualHost temporal en puerto 80 para que Certbot puede completar el reto HTTP-01
-        ACME_WEBROOT="/var/www/api-dns"
-        mkdir -p "$ACME_WEBROOT"
         # Asegurar que Apache escucha en puerto 80
         if ! grep -q "Listen 80" /etc/apache2/ports.conf; then
             echo "Listen 80" >> /etc/apache2/ports.conf
         fi
-        cat > /etc/apache2/sites-available/certbot-temp.conf <<APACHEEOF
+
+        # VirtualHost mínimo en puerto 80 solo para el reto ACME de Certbot (renovaciones automáticas)
+        # La API NO está expuesta en el 80, solo en el 8090
+        ACME_WEBROOT="/var/www/acme-challenge"
+        mkdir -p "$ACME_WEBROOT"
+        cat > /etc/apache2/sites-available/dns-api-http.conf <<APACHEEOF
 <VirtualHost *:80>
     ServerName $FULL_FQDN
     DocumentRoot $ACME_WEBROOT
+    # Solo permite el challenge de Let's Encrypt
     <Directory $ACME_WEBROOT>
         Options -Indexes
         AllowOverride None
         Require all granted
     </Directory>
+    # Bloquear cualquier otra ruta
+    <Location />
+        Require all denied
+    </Location>
+    <Location /.well-known/acme-challenge/>
+        Require all granted
+    </Location>
 </VirtualHost>
 APACHEEOF
-        a2ensite certbot-temp.conf
+        a2ensite dns-api-http.conf
         systemctl reload apache2
 
-        # Solicitar certificado con webroot (más fiable que --apache en entornos no estándar)
+        # Solicitar certificado via webroot
         certbot certonly --webroot -w "$ACME_WEBROOT" -d "$FULL_FQDN" \
             --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL" \
             --keep-until-expiring
-
-        # Limpiar VirtualHost temporal
-        a2dissite certbot-temp.conf
-        rm -f /etc/apache2/sites-available/certbot-temp.conf
-        systemctl reload apache2
 
         if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
             USE_SSL=true
@@ -365,12 +370,12 @@ APACHEEOF
     fi
 
     # Detección del socket de PHP
-    REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1 | sed 's/\//\\\//g')
-    [ -z "$REAL_PHP_SOCKET" ] && REAL_PHP_SOCKET="\/run\/php\/php-fpm.sock"
-    
+    REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
+    [ -z "$REAL_PHP_SOCKET" ] && REAL_PHP_SOCKET="/run/php/php-fpm.sock"
+
     # Generar configuración según disponibilidad de SSL
     if [ "$USE_SSL" = true ]; then
-        cat <<EOF > /etc/apache2/sites-available/dns-api.conf
+        cat > /etc/apache2/sites-available/dns-api.conf <<EOF
 <VirtualHost *:8090>
     ServerName $FULL_FQDN
     DocumentRoot /var/www
@@ -402,7 +407,7 @@ APACHEEOF
 </VirtualHost>
 EOF
     else
-        cat <<EOF > /etc/apache2/sites-available/dns-api.conf
+        cat > /etc/apache2/sites-available/dns-api.conf <<EOF
 <VirtualHost *:8090>
     DocumentRoot /var/www
     DirectoryIndex index.php
