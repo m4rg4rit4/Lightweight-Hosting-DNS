@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.15)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.16)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -151,14 +151,12 @@ ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
 DNS_ADMIN_EMAIL=$ADMIN_EMAIL
 LETSENCRYPT_EMAIL=$ADMIN_EMAIL
 
-# Configuración de Credenciales del Panel (siempre preguntar)
-DEFAULT_USER=${ADMIN_USER:-"admin"}
-ask_input "4. Introduce el USUARIO de administración [$DEFAULT_USER]: " "$DEFAULT_USER" "ADMIN_USER"
-ADMIN_USER=$(sanitize_var "$ADMIN_USER")
-
-DEFAULT_PASS=${ADMIN_PASS:-$(openssl rand -base64 12)}
-ask_input "5. Introduce la CONTRASEÑA de administración [$DEFAULT_PASS]: " "$DEFAULT_PASS" "ADMIN_PASS"
-ADMIN_PASS=$(sanitize_var "$ADMIN_PASS")
+# Configuración de Credenciales del Panel (Automática)
+printf "${YELLOW}Configurando credenciales del panel de administración...${NC}\n"
+ADMIN_USER=${ADMIN_USER:-"admin"}
+ADMIN_PASS=${ADMIN_PASS:-$(openssl rand -base64 12)}
+# No se solicita entrada para admin_user/pass por simplicidad
+printf "${GREEN}Usuario: $ADMIN_USER | Contraseña: [Generada/Existente]${NC}\n"
 
 printf "\n"
 
