@@ -30,11 +30,16 @@ if (!$configLoaded) {
 // Función para verificar si el usuario está logueado
 function checkAuth() {
     if (!isset($_SESSION['lwh_logged_in']) || $_SESSION['lwh_logged_in'] !== true) {
-        // Redirigir al login.php en el mismo directorio
+        // Redirigir al login.php en el mismo directorio con parámetro de retorno
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
         $host = $_SERVER['HTTP_HOST'];
         $dir = dirname($_SERVER['PHP_SELF']);
-        header("Location: $protocol://$host" . $dir . "/login.php");
+        $currentFile = basename($_SERVER['PHP_SELF']);
+        
+        // Evitar bucles con login.php
+        if ($currentFile === 'login.php') return;
+
+        header("Location: $protocol://$host" . $dir . "/login.php?redirect=" . urlencode($currentFile));
         exit;
     }
 }

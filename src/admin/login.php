@@ -13,6 +13,8 @@ if (!file_exists($configFile)) {
 }
 require_once $configFile;
 
+$redirect = $_GET['redirect'] ?? $_POST['redirect'] ?? 'index.php';
+
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $user = $_POST['user'] ?? '';
@@ -26,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['lwh_user'] = $user;
         
         // Redirigir a la página principal (o a la que intentaba entrar)
-        header("Location: index.php");
+        header("Location: " . $redirect);
         exit;
     } else {
         $error = "Usuario o contraseña incorrectos.";
@@ -144,6 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php endif; ?>
 
     <form method="POST">
+        <input type="hidden" name="redirect" value="<?= htmlspecialchars($redirect) ?>">
         <div class="mb-3">
             <label class="form-label small text-secondary">Usuario</label>
             <input type="text" name="user" class="form-control" placeholder="admin" required autofocus>
