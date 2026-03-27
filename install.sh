@@ -543,6 +543,12 @@ CREATE TABLE IF NOT EXISTS sys_dns_tokens (
 );
 EOF
 
+# Actualización del esquema (v1.2.17): Añadir sort_order si no existe
+if ! mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "DESCRIBE sys_dns_records sort_order" >/dev/null 2>&1; then
+    printf "${YELLOW}Actualizando tabla sys_dns_records: Añadiendo sort_order...${NC}\n"
+    mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "ALTER TABLE sys_dns_records ADD COLUMN sort_order INT DEFAULT 0;"
+fi
+
 # Comprobar si ya existe un token maestro para la API
 EXISTING_MASTER=$(mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -ss -e "SELECT token FROM sys_dns_tokens WHERE client_name = 'Master Admin Token' LIMIT 1;")
 
