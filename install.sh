@@ -13,12 +13,12 @@ NC='\033[0m'
 
 # Detectar modo actualización
 UPDATE_MODE=false
-if [[ " $* " == *" /update "* ]]; then
+if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     UPDATE_MODE=true
-    printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
+    printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.6)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.7)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -297,47 +297,53 @@ fi
 systemctl restart apache2
 
 # 3.3 Configurar VirtualHost para DNS API (Puerto 8090 con SSL si es posible)
-if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true ]; then
-    printf "${YELLOW}Verificando conectividad para certificado SSL...${NC}\n"
+# Siempre se ejecuta (idempotente) para garantizar la configuración correcta en instalaciones y actualizaciones
+printf "${YELLOW}Verificando conectividad para certificado SSL...${NC}\n"
 
-    # Obtener IP pública del servidor
-    PUBLIC_IP=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ifconfig.me 2>/dev/null)
-    # Resolver el dominio SIEMPRE via DNS externo (8.8.8.8) para ignorar /etc/hosts
-    FQDN_IP=$(dig @8.8.8.8 +short "$FULL_FQDN" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1)
+# Obtener IP pública del servidor
+PUBLIC_IP=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ifconfig.me 2>/dev/null)
+# Resolver SIEMPRE via DNS externo (8.8.8.8) para ignorar /etc/hosts
+FQDN_IP=$(dig @8.8.8.8 +short "$FULL_FQDN" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1)
 
-    printf "${YELLOW}Diagnóstico DNS:${NC}\n"
-    printf "  - FQDN configurado: $FULL_FQDN\n"
-    printf "  - IP Pública detectada: $PUBLIC_IP\n"
-    printf "  - IP que resuelve el dominio (DNS externo): $FQDN_IP\n"
+printf "${YELLOW}Diagnóstico DNS:${NC}\n"
+printf "  - FQDN: $FULL_FQDN\n"
+printf "  - IP del servidor: $PUBLIC_IP\n"
+printf "  - IP DNS externo:  $FQDN_IP\n"
 
-    # Reutilizar certificado existente si ya fue generado previamente
-    USE_SSL=false
-    if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
-        printf "${GREEN}Certificado SSL existente encontrado. Reutilizando...${NC}\n"
-        USE_SSL=true
-    elif [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
-        printf "${GREEN}El dominio $FULL_FQDN apunta correctamente a $PUBLIC_IP. Generando certificado SSL...${NC}\n"
+# Asegurar que Apache escucha en 8090
+if ! grep -q "Listen 8090" /etc/apache2/ports.conf; then
+    echo "Listen 8090" >> /etc/apache2/ports.conf
+fi
 
-        # Asegurar que Apache escucha en puerto 80
-        if ! grep -q "Listen 80" /etc/apache2/ports.conf; then
-            echo "Listen 80" >> /etc/apache2/ports.conf
-        fi
+# Detección del socket de PHP
+REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
+[ -z "$REAL_PHP_SOCKET" ] && REAL_PHP_SOCKET="/run/php/php-fpm.sock"
 
-        # VirtualHost mínimo en puerto 80 solo para el reto ACME de Certbot (renovaciones automáticas)
-        # La API NO está expuesta en el 80, solo en el 8090
-        ACME_WEBROOT="/var/www/acme-challenge"
-        mkdir -p "$ACME_WEBROOT"
-        cat > /etc/apache2/sites-available/dns-api-http.conf <<APACHEEOF
+# Determinar si tenemos o podemos obtener certificado SSL
+USE_SSL=false
+if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
+    printf "${GREEN}Certificado SSL existente encontrado. Reutilizando...${NC}\n"
+    USE_SSL=true
+elif [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
+    printf "${GREEN}IPs coinciden. Generando certificado SSL con Certbot...${NC}\n"
+
+    # Asegurar que Apache escucha en puerto 80 (solo para ACME challenge)
+    if ! grep -q "Listen 80" /etc/apache2/ports.conf; then
+        echo "Listen 80" >> /etc/apache2/ports.conf
+    fi
+
+    # VirtualHost mínimo en puerto 80 solo para el reto ACME (API no expuesta en 80)
+    ACME_WEBROOT="/var/www/acme-challenge"
+    mkdir -p "$ACME_WEBROOT"
+    cat > /etc/apache2/sites-available/dns-api-http.conf <<APACHEEOF
 <VirtualHost *:80>
     ServerName $FULL_FQDN
     DocumentRoot $ACME_WEBROOT
-    # Solo permite el challenge de Let's Encrypt
     <Directory $ACME_WEBROOT>
         Options -Indexes
         AllowOverride None
         Require all granted
     </Directory>
-    # Bloquear cualquier otra ruta
     <Location />
         Require all denied
     </Location>
@@ -346,39 +352,29 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true
     </Location>
 </VirtualHost>
 APACHEEOF
-        a2ensite dns-api-http.conf
-        systemctl reload apache2
+    a2ensite dns-api-http.conf
+    systemctl reload apache2
 
-        # Solicitar certificado via webroot
-        certbot certonly --webroot -w "$ACME_WEBROOT" -d "$FULL_FQDN" \
-            --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL" \
-            --keep-until-expiring
+    # Solicitar certificado via webroot
+    certbot certonly --webroot -w "$ACME_WEBROOT" -d "$FULL_FQDN" \
+        --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL" \
+        --keep-until-expiring
 
-        if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
-            USE_SSL=true
-            printf "${GREEN}Certificado SSL generado correctamente.${NC}\n"
-        else
-            printf "${RED}Error: certbot no pudo generar el certificado SSL.${NC}\n"
-            printf "${YELLOW}Últimas líneas del log de certbot:${NC}\n"
-            tail -n 25 /var/log/letsencrypt/letsencrypt.log | sed 's/^/  /'
-        fi
+    if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
+        USE_SSL=true
+        printf "${GREEN}Certificado SSL generado correctamente.${NC}\n"
     else
-        printf "${YELLOW}Advertencia: el dominio $FULL_FQDN no apunta a la IP de este servidor ($PUBLIC_IP vs $FQDN_IP).${NC}\n"
-        printf "${YELLOW}Se configurará el puerto 8090 sin cifrado SSL.${NC}\n"
+        printf "${RED}Error: Certbot no pudo generar el certificado SSL.${NC}\n"
+        printf "${YELLOW}Últimas líneas del log de certbot:${NC}\n"
+        tail -n 25 /var/log/letsencrypt/letsencrypt.log | sed 's/^/  /'
     fi
+else
+    printf "${YELLOW}Advertencia: $FULL_FQDN no apunta a este servidor ($PUBLIC_IP vs $FQDN_IP). Configurando sin SSL.${NC}\n"
+fi
 
-    # Asegurar que Apache escucha en el puerto 8090
-    if ! grep -q "Listen 8090" /etc/apache2/ports.conf; then
-        echo "Listen 8090" >> /etc/apache2/ports.conf
-    fi
-
-    # Detección del socket de PHP
-    REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
-    [ -z "$REAL_PHP_SOCKET" ] && REAL_PHP_SOCKET="/run/php/php-fpm.sock"
-
-    # Generar configuración según disponibilidad de SSL
-    if [ "$USE_SSL" = true ]; then
-        cat > /etc/apache2/sites-available/dns-api.conf <<EOF
+# Generar configuración Apache según disponibilidad de SSL
+if [ "$USE_SSL" = true ]; then
+    cat > /etc/apache2/sites-available/dns-api.conf <<EOF
 <VirtualHost *:8090>
     ServerName $FULL_FQDN
     DocumentRoot /var/www
@@ -409,8 +405,8 @@ APACHEEOF
     </Directory>
 </VirtualHost>
 EOF
-    else
-        cat > /etc/apache2/sites-available/dns-api.conf <<EOF
+else
+    cat > /etc/apache2/sites-available/dns-api.conf <<EOF
 <VirtualHost *:8090>
     DocumentRoot /var/www
     DirectoryIndex index.php
@@ -436,19 +432,9 @@ EOF
     </Directory>
 </VirtualHost>
 EOF
-    fi
+a2ensite dns-api.conf
+systemctl reload apache2
 
-    # Resolver las barras escapadas del sed si se usó cat
-    sed -i "s|\\\\/|/|g" /etc/apache2/sites-available/dns-api.conf
-
-    # Abrir puerto en el firewall si está activo
-    if command -v ufw >/dev/null 2>&1; then
-        ufw allow 8090/tcp
-    fi
-
-    a2ensite dns-api.conf
-    systemctl reload apache2
-fi
 
 # 4. Instalación del Servidor DNS (BIND9)
 printf "${YELLOW}Instalando BIND9...${NC}\n"
