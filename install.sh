@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.2)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.3)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -301,19 +301,37 @@ if [ ! -f /etc/apache2/sites-available/dns-api.conf ] || [ "$UPDATE_MODE" = true
     printf "${YELLOW}Verificando conectividad para certificado SSL...${NC}\n"
     
     # Obtener IP pública del servidor
-    PUBLIC_IP=$(curl -s https://ifconfig.me)
-    # Obtener IP a la que apunta el dominio
-    FQDN_IP=$(dig +short "$FULL_FQDN" | tail -n1)
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
+    # Obtener IP a la que apunta el dominio (usar multiple métodos)
+    FQDN_IP=$(getent hosts "$FULL_FQDN" | awk '{print $1}')
+    [ -z "$FQDN_IP" ] && FQDN_IP=$(dig +short "$FULL_FQDN" | tail -n1)
     
+    printf "${YELLOW}Diagnóstico DNS:${NC}\n"
+    printf "  - FQDN configurado: $FULL_FQDN\n"
+    printf "  - IP Pública detectada: $PUBLIC_IP\n"
+    printf "  - IP que resuelve el dominio: $FQDN_IP\n"
+
     USE_SSL=false
     if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" == "$FQDN_IP" ]; then
         printf "${GREEN}El dominio $FULL_FQDN apunta correctamente a $PUBLIC_IP. Solicitando certificado...${NC}\n"
+        
+        # Asegurar vhost en puerto 80 para el reto ACME
+        if [ ! -f /etc/apache2/sites-available/000-default.conf ]; then
+            printf "127.0.0.1 localhost\n" > /etc/hosts # Asegurar localhost para Apache
+            echo "ServerName $FULL_FQDN" > /etc/apache2/conf-available/servername.conf
+            a2enconf servername.conf
+        fi
+
+        # Intentar generar certificado
         certbot certonly --apache -d "$FULL_FQDN" --non-interactive --agree-tos --email "$LETSENCRYPT_EMAIL"
+        
         if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ]; then
             USE_SSL=true
             printf "${GREEN}Certificado SSL generado correctamente.${NC}\n"
         else
-            printf "${RED}Error: No se pudo generar el certificado SSL.${NC}\n"
+            printf "${RED}Error: certbot no pudo generar el certificado SSL.${NC}\n"
+            printf "${YELLOW}Revisando logs de certbot...${NC}\n"
+            tail -n 20 /var/log/letsencrypt/letsencrypt.log | sed 's/^/  /'
         fi
     else
         printf "${YELLOW}Advertencia: el dominio $FULL_FQDN no apunta a la IP de este servidor ($PUBLIC_IP vs $FQDN_IP).${NC}\n"
