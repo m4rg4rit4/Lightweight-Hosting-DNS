@@ -533,11 +533,6 @@ CREATE TABLE IF NOT EXISTS sys_dns_records (
     FOREIGN KEY (zone_id) REFERENCES sys_dns_zones(id) ON DELETE CASCADE
 );
 
-# Actualización del esquema (v1.2.15): Añadir sort_order si no existe
-if ! mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "DESCRIBE sys_dns_records sort_order" >/dev/null 2>&1; then
-    printf "${YELLOW}Actualizando tabla sys_dns_records: Añadiendo sort_order...${NC}\n"
-    mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "ALTER TABLE sys_dns_records ADD COLUMN sort_order INT DEFAULT 0;"
-fi
 
 CREATE TABLE IF NOT EXISTS sys_dns_tokens (
     id INT AUTO_INCREMENT PRIMARY KEY,
