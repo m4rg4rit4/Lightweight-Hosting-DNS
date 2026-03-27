@@ -99,7 +99,7 @@ $tokens = $stmt->fetchAll();
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-secondary mb-4">
   <div class="container-fluid">
     <a class="navbar-brand" href="#"><i class="bi bi-hdd-network"></i> Lightweight Hosting</a>
-    <span class="navbar-text ms-auto text-primary fw-bold">DNS API Tokens (Sin Autenticación Temporal)</span>
+    <span class="navbar-text ms-auto text-primary fw-bold">DNS API Tokens</span>
   </div>
 </nav>
 
