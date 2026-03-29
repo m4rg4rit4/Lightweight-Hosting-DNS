@@ -18,7 +18,7 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.14)...${NC}\n"
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.15)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -531,6 +531,7 @@ CREATE TABLE IF NOT EXISTS sys_dns_records (
     content VARCHAR(255) NOT NULL,
     ttl INT DEFAULT 3600,
     priority INT NULL,
+    sort_order INT DEFAULT 0,
     FOREIGN KEY (zone_id) REFERENCES sys_dns_zones(id) ON DELETE CASCADE
 );
 
@@ -541,6 +542,9 @@ CREATE TABLE IF NOT EXISTS sys_dns_tokens (
     is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+# Migración: Añadir columna sort_order si no existe (idempotencia para actualizaciones)
+mariadb -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e "ALTER TABLE sys_dns_records ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0;" 2>/dev/null || true
 EOF
 
 # Comprobar si ya existe un token maestro para la API
