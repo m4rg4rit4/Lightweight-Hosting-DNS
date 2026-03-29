@@ -100,7 +100,7 @@ foreach ($requests as $req) {
             }
             
             // b) Recuperar Registros
-            $recStmt = $pdo->prepare("SELECT * FROM sys_dns_records WHERE zone_id = ?");
+            $recStmt = $pdo->prepare("SELECT * FROM sys_dns_records WHERE zone_id = ? ORDER BY sort_order ASC, id ASC");
             $recStmt->execute([$zonaId]);
             $records = $recStmt->fetchAll();
             

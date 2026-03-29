@@ -229,6 +229,7 @@ function handlePostRecordAdd($pdo, $input) {
     $content = trim($input['content'] ?? '');
     $ttl = intval($input['ttl'] ?? 3600);
     $priority = isset($input['priority']) ? intval($input['priority']) : null;
+    $sort_order = isset($input['sort_order']) ? intval($input['sort_order']) : 0;
 
     if (empty($domain) || empty($name) || empty($type) || empty($content)) {
         response(400, false, "Faltan parámetros: domain, name, type, content son obligatorios.");
@@ -277,8 +278,8 @@ function handlePostRecordAdd($pdo, $input) {
         processSpfUpdate($pdo, $zoneId, $domain, $content, $ttl);
     } else {
         // Inserción normal
-        $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content, ttl, priority) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$zoneId, $name, $type, $content, $ttl, $priority]);
+        $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content, ttl, priority, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$zoneId, $name, $type, $content, $ttl, $priority, $sort_order]);
         
         queueZoneUpdate($pdo, $domain);
         response(200, true, "Registro $type añadido a $domain$warning.");
@@ -334,6 +335,7 @@ function handlePostRecordEdit($pdo, $input) {
     $content = trim($input['content'] ?? '');
     $ttl = intval($input['ttl'] ?? 3600);
     $priority = isset($input['priority']) ? intval($input['priority']) : null;
+    $sort_order = isset($input['sort_order']) ? intval($input['sort_order']) : 0;
 
     if (!$id || empty($name) || empty($type) || empty($content)) {
         response(400, false, "Faltan parámetros: id, name, type, content son obligatorios.");
@@ -347,8 +349,8 @@ function handlePostRecordEdit($pdo, $input) {
     $domain = $res['domain'];
 
     // Actualizar
-    $upStmt = $pdo->prepare("UPDATE sys_dns_records SET name = ?, type = ?, content = ?, ttl = ?, priority = ? WHERE id = ?");
-    $upStmt->execute([$name, $type, $content, $ttl, $priority, $id]);
+    $upStmt = $pdo->prepare("UPDATE sys_dns_records SET name = ?, type = ?, content = ?, ttl = ?, priority = ?, sort_order = ? WHERE id = ?");
+    $upStmt->execute([$name, $type, $content, $ttl, $priority, $sort_order, $id]);
 
     queueZoneUpdate($pdo, $domain);
     response(200, true, "Registro actualizado correctamente.");
@@ -407,10 +409,11 @@ function handleGetStatus($pdo, $id) {
 
 function handleGetRecords($pdo, $domain) {
     $stmt = $pdo->prepare("
-        SELECT r.id, r.name, r.type, r.content, r.ttl, r.priority 
+        SELECT r.id, r.name, r.type, r.content, r.ttl, r.priority, r.sort_order 
         FROM sys_dns_records r 
         JOIN sys_dns_zones z ON r.zone_id = z.id 
         WHERE z.domain = ?
+        ORDER BY r.sort_order ASC, r.id ASC
     ");
     $stmt->execute([$domain]);
     $records = $stmt->fetchAll();
@@ -482,7 +485,7 @@ function handleGetZoneExport($pdo, $domain) {
     }
 
     // Obtener registros
-    $stmt = $pdo->prepare("SELECT name, type, content, ttl, priority FROM sys_dns_records WHERE zone_id = ? ORDER BY type='SOA' DESC, type='NS' DESC, name ASC");
+    $stmt = $pdo->prepare("SELECT name, type, content, ttl, priority FROM sys_dns_records WHERE zone_id = ? ORDER BY type='SOA' DESC, type='NS' DESC, sort_order ASC, id ASC");
     $stmt->execute([$zone['id']]);
     $records = $stmt->fetchAll();
 
