@@ -18,7 +18,13 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
-printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v1.2.18)...${NC}\n"
+if [ -f "VERSION" ]; then
+    VERSION=$(cat VERSION)
+else
+    VERSION="1.2.19"
+fi
+
+printf "${GREEN}Iniciando instalación ultra-ligera del servidor DNS (v$VERSION)...${NC}\n"
 
 # Función de limpieza de variables
 sanitize_var() {
@@ -279,6 +285,7 @@ if [ "$HAS_LWH" = true ]; then
     update_php_const "LETSENCRYPT_EMAIL" "$LETSENCRYPT_EMAIL"
     update_php_const "ADMIN_USER" "$ADMIN_USER"
     update_php_const "ADMIN_PASS" "$ADMIN_PASS"
+    update_php_const "SYSTEM_VERSION" "$VERSION"
     update_php_const "DNS_INSTALLED" "true"
 fi
 
@@ -574,6 +581,7 @@ curl -sSL "$REPO_RAW/src/admin/auth.php" -o "$TEMP_DIR/auth.php"
 curl -sSL "$REPO_RAW/src/admin/login.php" -o "$TEMP_DIR/login.php"
 curl -sSL "$REPO_RAW/src/engine/sync_dns.php" -o "$TEMP_DIR/sync_dns.php"
 curl -sSL "$REPO_RAW/src/engine/template.zone.php" -o "$TEMP_DIR/template.zone.php"
+curl -sSL "$REPO_RAW/autoupdate.sh" -o "$TEMP_DIR/autoupdate.sh"
 
 if [ ! -f "$TEMP_DIR/dns_tokens.php" ] || [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/sync_dns.php" ]; then
     printf "${RED}Error: No se pudieron descargar los archivos esenciales desde GitHub.${NC}\n"
@@ -589,6 +597,8 @@ cp "$TEMP_DIR/index.php" "$API_PATH/index.php"
 cp "$TEMP_DIR/.htaccess" "$API_PATH/.htaccess"
 cp "$TEMP_DIR/sync_dns.php" "$ENGINE_PATH/sync_dns.php"
 cp "$TEMP_DIR/template.zone.php" "$ENGINE_PATH/template.zone.php"
+cp "$TEMP_DIR/autoupdate.sh" "$ENGINE_PATH/autoupdate.sh"
+chmod +x "$ENGINE_PATH/autoupdate.sh"
 
 # Permisos y limpieza
 chown -R www-data:www-data "$ADMIN_PATH" "$API_PATH"
@@ -603,6 +613,12 @@ CRON_SCRIPT="$ENGINE_PATH/sync_dns.php"
 if ! crontab -l 2>/dev/null | grep -q "sync_dns.php"; then
     (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/php $CRON_SCRIPT > /dev/null 2>&1") | crontab -
     printf "${GREEN}Cron de sync_dns configurado.${NC}\n"
+fi
+
+# 7.1 Configurar Cron Job para Autoupdate (Diariamente a las 03:00)
+if ! crontab -l 2>/dev/null | grep -q "autoupdate.sh"; then
+    (crontab -l 2>/dev/null; echo "0 3 * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /bin/bash $ENGINE_PATH/autoupdate.sh >> /var/log/dns_autoupdate.log 2>&1") | crontab -
+    printf "${GREEN}Cron de autoupdate configurado.${NC}\n"
 fi
 
 # 8. Activar Configuraciones de BIND
