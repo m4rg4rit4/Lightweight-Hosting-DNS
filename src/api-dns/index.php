@@ -109,7 +109,9 @@ try {
             response(404, false, "Ruta POST no encontrada: $routeString");
         }
     } elseif ($method === 'GET') {
-        if (strpos($routeString, 'status/') === 0) {
+        if ($routeString === 'status/pending') {
+            handleGetPendingStatus($pdo);
+        } elseif (strpos($routeString, 'status/') === 0) {
             $id = intval(substr($routeString, 7));
             handleGetStatus($pdo, $id);
         } elseif ($routeString === 'zones') {
@@ -126,8 +128,6 @@ try {
         } elseif (strpos($routeString, 'verify/') === 0) {
             $domain = substr($routeString, 7);
             handleGetVerify($pdo, $domain);
-        } elseif ($routeString === 'status/pending') {
-            handleGetPendingStatus($pdo);
         } elseif ($routeString === '' || $routeString === '/') {
             response(200, true, "Lightweight DNS API is active.", [
                 'endpoints' => [
@@ -178,15 +178,25 @@ function handlePostAdd($pdo, $input) {
     $stmt->execute([$domain, $zoneFile]);
     $zoneId = $pdo->lastInsertId();
 
-    // Insertar registros base (NS y A del dominio)
+    // Insertar registros base (NS, A y SOA del dominio)
     $ns1 = (defined('DNS_HOSTNAME') && defined('DNS_DOMAIN')) ? DNS_HOSTNAME . '.' . DNS_DOMAIN : 'ns1.' . $domain;
+    
+    // NS record
     $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'NS', ?)");
     $stmt->execute([$zoneId, $ns1 . "."]);
 
+    // A record
     if (!empty($ip)) {
         $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'A', ?)");
         $stmt->execute([$zoneId, $ip]);
     }
+
+    // SOA record (Default content)
+    $admin_email_raw = defined('DNS_ADMIN_EMAIL') ? DNS_ADMIN_EMAIL : (defined('ADMIN_EMAIL') ? ADMIN_EMAIL : 'admin.' . $domain);
+    $admin_email = str_replace('@', '.', $admin_email_raw);
+    $soa_content = "{$ns1}. {$admin_email}. ( {SERIAL} 3600 1800 604800 86400 )";
+    $stmt = $pdo->prepare("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'SOA', ?)");
+    $stmt->execute([$zoneId, $soa_content]);
 
     // Encolar generación de zona
     queueZoneUpdate($pdo, $domain);
@@ -502,7 +512,39 @@ function handleGetZoneExport($pdo, $domain) {
         echo "; Full Zone Export for $domain\n";
         echo "\$ORIGIN $domain.\n";
         echo "\$TTL 3600\n\n";
+
+        // Buscar el SOA
+        $soa = null;
         foreach ($records as $r) {
+            if ($r['type'] === 'SOA') {
+                $soa = $r;
+                break;
+            }
+        }
+
+        // Imprimir SOA manual si no existe en records
+        if (!$soa) {
+            $ns1 = (defined('DNS_HOSTNAME') && defined('DNS_DOMAIN')) ? DNS_HOSTNAME . '.' . DNS_DOMAIN : 'ns1.' . $domain;
+            $admin_email_raw = defined('DNS_ADMIN_EMAIL') ? DNS_ADMIN_EMAIL : (defined('ADMIN_EMAIL') ? ADMIN_EMAIL : 'admin.' . $domain);
+            $admin_email = str_replace('@', '.', $admin_email_raw);
+            echo "@\tIN\tSOA\t{$ns1}. {$admin_email}. (\n";
+            echo "\t\t\t{$serial}\t; Serial\n";
+            echo "\t\t\t3600\t\t; Refresh\n";
+            echo "\t\t\t1800\t\t; Retry\n";
+            echo "\t\t\t604800\t\t; Expire\n";
+            echo "\t\t\t86400\t\t; Minimum TTL\n";
+            echo ")\n\n";
+        }
+
+        foreach ($records as $r) {
+            if ($r['type'] === 'SOA' && $soa) {
+                $soaContent = str_replace('{SERIAL}', $serial, $r['content']);
+                echo "@\tIN\tSOA\t{$soaContent}\n";
+                $soa = null; // Para no imprimirlo más veces
+                continue;
+            }
+            if ($r['type'] === 'SOA') continue;
+            
             $priority = ($r['type'] === 'MX' || $r['type'] === 'SRV') ? ($r['priority'] ?? 10) . "\t" : "";
             echo "{$r['name']}\t{$r['ttl']}\tIN\t{$r['type']}\t{$priority}{$r['content']}\n";
         }
