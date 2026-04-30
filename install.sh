@@ -18,6 +18,11 @@ if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: Instalación no interactiva activada.${NC}\n"
 fi
 
+if [[ " $* " == *" /config "* ]]; then
+    UPDATE_MODE=false
+    printf "${YELLOW}>>> MODO CONFIGURACIÓN forzado (/config).${NC}\n"
+fi
+
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
