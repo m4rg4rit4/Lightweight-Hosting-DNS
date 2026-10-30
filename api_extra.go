@@ -41,6 +41,7 @@ func (api *API) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.DB.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('delete', ?, 'pending')", req.Domain)
+	TriggerSync()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -174,6 +175,7 @@ func (api *API) HandleRecordEdit(w http.ResponseWriter, r *http.Request) {
 
 
 	api.DB.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('add', ?, 'pending')", domain)
+	TriggerSync()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "Record updated"})
@@ -233,6 +235,7 @@ func (api *API) HandleRecordDel(w http.ResponseWriter, r *http.Request) {
 
 	if domain != "" {
 		api.DB.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('add', ?, 'pending')", domain)
+		TriggerSync()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

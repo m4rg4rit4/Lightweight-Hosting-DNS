@@ -1,9 +1,9 @@
 package main
 
 import (
-	"os"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -48,6 +48,8 @@ func (api *API) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // export, and /api-dns/zone/server sits inside it, so a mistake there would
 // silently break either the export or the server assignment.
 func (api *API) registerRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api-dns/zone/assignment", api.AuthMiddleware(api.HandleGetAssignment))
+	mux.HandleFunc("/api-dns/jobs", api.AuthMiddleware(api.HandleJob))
 	mux.HandleFunc("/api-dns/add", api.AuthMiddleware(api.HandleAdd))
 	mux.HandleFunc("/api-dns/delete", api.AuthMiddleware(api.HandleDelete))
 	mux.HandleFunc("/api-dns/record/add", api.AuthMiddleware(api.HandleRecordAdd))
@@ -60,6 +62,7 @@ func (api *API) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api-dns/zone/server/bulk", api.AuthMiddleware(api.HandleZoneServerBulk))
 	mux.HandleFunc("/api-dns/zone/", api.AuthMiddleware(api.HandleZoneExport))
 	mux.HandleFunc("/api-dns/status/", api.AuthMiddleware(api.HandleStatus))
+	mux.HandleFunc("/api-dns/reload", api.AuthMiddleware(api.HandleReload))
 
 	mux.HandleFunc("/api-dns/ddns/register", api.HandleDdnsRegister)
 	mux.HandleFunc("/api-dns/ddns/update", api.HandleDdnsUpdate)
@@ -117,7 +120,3 @@ func main() {
 		log.Fatal(err)
 	}
 }
-
-
-
-

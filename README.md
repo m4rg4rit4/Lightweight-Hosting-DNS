@@ -117,3 +117,17 @@ VALUES ('<token>', 'acme', 'tu-dominio.com', '_acme-challenge', 'TXT', 0);
 go build ./...
 go test ./...
 ```
+
+## Publicación y asignación de zonas
+
+Las escrituras de Hosting utilizan tareas persistentes por nodo mediante `POST /api-dns/jobs`. Cada clave identifica una única operación: los reintentos consultan el mismo recibo sin duplicar la escritura. Las publicaciones se completan después de recargar BIND; un fallo conserva la tarea para reintentar.
+
+La asignación de una zona se guarda en `sys_dns_zones.server_slug`, con una `assignment_revision` creciente. Es una etiqueta de organización; liberar una zona no elimina registros ni mueve el sitio web. Todos los Hosting del clúster deben utilizar el mismo primer DNS como autoridad de asignación.
+
+Las decisiones pasan por `/api-dns/zone/assignment/decide` dentro de una tarea, indicando la versión que vio el usuario. Una versión desactualizada devuelve `409`. Hosting replica únicamente las decisiones aceptadas mediante `/api-dns/zone/assignment/apply`; los nodos ignoran versiones antiguas. `GET /api-dns/zone/assignment?domain=example.com` permite comprobar propietario y versión por nodo. Las asignaciones no necesitan recargar BIND.
+
+Actualizar primero el binario Go en todos los DNS y después Hosting. Las migraciones de MariaDB se aplican al arrancar y requieren tablas InnoDB. Compilar para Linux con `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o lwh-dns-v2 .`.
+
+Validación: `go test ./...` y `go vet ./...`. Las pruebas cubren reintentos, rollback, reclamaciones simultáneas, liberación y réplicas retrasadas.
+
+Los nombres de los servidores DNS se reciben en el campo `nameservers` de la API o en `DNS_NAMESERVERS` del EnvironmentFile privado. Hosting los obtiene de los nodos configurados en su base de datos y envía la misma lista a todos. No guardar dominios reales, credenciales ni archivos de despliegue en el repositorio.

@@ -8,16 +8,21 @@ import (
 	"strings"
 )
 
-type API struct {
-	DB *sql.DB
+type dnsDB interface {
+	Exec(string, ...interface{}) (sql.Result, error)
+	Query(string, ...interface{}) (*sql.Rows, error)
+	QueryRow(string, ...interface{}) *sql.Row
 }
+
+type API struct{ DB dnsDB }
 
 type AddRequest struct {
 	Domain string `json:"domain"`
 	IP     string `json:"ip"`
 	// Hosting server this zone belongs to. Only a label for the panel's view
 	// filter; empty means unassigned and is perfectly valid.
-	Server string `json:"server"`
+	Server      string   `json:"server"`
+	Nameservers []string `json:"nameservers"`
 }
 
 type RecordAddReq struct {
@@ -54,6 +59,11 @@ func (api *API) HandleAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if exists
+	nameservers, nsErr := resolveNameservers(req.Nameservers)
+	if nsErr != nil {
+		http.Error(w, `{"message":"Configure DNS_NAMESERVERS or provide valid nameservers"}`, http.StatusServiceUnavailable)
+		return
+	}
 	var id int
 	err := api.DB.QueryRow("SELECT id FROM sys_dns_zones WHERE domain = ?", req.Domain).Scan(&id)
 	if err == nil {
@@ -75,22 +85,24 @@ func (api *API) HandleAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	zoneId, _ := res.LastInsertId()
 
-	ns1 := "ns1." + req.Domain // fallback
 	adminEmail := "admin." + req.Domain
 
-	// Insert base records
-	api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'NS', ?)", zoneId, ns1+".")
-	
+	// Insert base records: valid authoritative nameservers
+	for _, nameserver := range nameservers {
+		api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'NS', ?)", zoneId, nameserver)
+	}
+
 	if req.IP != "" {
 		api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'A', ?)", zoneId, req.IP)
 		api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, 'www', 'CNAME', ?)", zoneId, "@")
 	}
 
-	soaContent := fmt.Sprintf("%s. %s. ( {SERIAL} 3600 1800 604800 86400 )", ns1, adminEmail)
+	soaContent := fmt.Sprintf("%s %s. ( {SERIAL} 3600 1800 604800 86400 )", nameservers[0], adminEmail)
 	api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'SOA', ?)", zoneId, soaContent)
 
-	// Queue update
+	// Queue update and trigger immediate sync
 	api.DB.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('add', ?, 'pending')", req.Domain)
+	TriggerSync()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -147,18 +159,40 @@ func (api *API) HandleRecordAdd(w http.ResponseWriter, r *http.Request) {
 
 	_, err = api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content, ttl, priority, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		zoneId, req.Name, req.Type, req.Content, ttl, priority, req.SortOrder)
-	
+
 	if err != nil {
 		http.Error(w, `{"success":false,"message":"DB Error"}`, http.StatusInternalServerError)
 		return
 	}
 
 	api.DB.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('add', ?, 'pending')", req.Domain)
+	TriggerSync()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Record added successfully",
+	})
+}
+
+func (api *API) HandleReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	scope := scopeOf(r)
+	if !scope.CanManageZones() {
+		denyScope(w)
+		return
+	}
+
+	TriggerSync()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Check and reload initiated",
 	})
 }
 
@@ -179,4 +213,3 @@ func SanitizeRecord(domain, name, recordType, content string) (string, string) {
 	}
 	return name, content
 }
-

@@ -53,13 +53,24 @@ func (api *API) HandleZoneServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Once coordinated ownership is in use, old unversioned writes must not
+	// overwrite it. They remain available for legacy revision-zero zones.
+	var revision uint64
+	if err := api.DB.QueryRow("SELECT assignment_revision FROM sys_dns_zones WHERE domain = ?", req.Domain).Scan(&revision); err != nil {
+		http.Error(w, `{"message":"Domain lookup failed"}`, 503)
+		return
+	}
+	if revision > 0 {
+		http.Error(w, `{"message":"Use the revisioned assignment API"}`, 409)
+		return
+	}
 	// An empty server unassigns, which is a legitimate operation.
 	var slug interface{}
 	if s := normalizeSlug(req.Server); s != "" {
 		slug = s
 	}
 
-	res, err := api.DB.Exec("UPDATE sys_dns_zones SET server_slug = ? WHERE domain = ?", slug, req.Domain)
+	res, err := api.DB.Exec("UPDATE sys_dns_zones SET server_slug = ? WHERE domain = ? AND assignment_revision = 0", slug, req.Domain)
 	if err != nil {
 		http.Error(w, `{"success":false,"message":"DB Error"}`, http.StatusInternalServerError)
 		return
@@ -120,7 +131,7 @@ func (api *API) HandleZoneServerBulk(w http.ResponseWriter, r *http.Request) {
 		args = append(args, d)
 	}
 
-	query := "UPDATE sys_dns_zones SET server_slug = ? WHERE domain IN (" + strings.Join(placeholders, ",") + ")"
+	query := "UPDATE sys_dns_zones SET server_slug = ? WHERE domain IN (" + strings.Join(placeholders, ",") + ") AND assignment_revision = 0"
 	if req.OnlyUnassigned {
 		query += " AND (server_slug IS NULL OR server_slug = '')"
 	}

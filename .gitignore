@@ -1,2 +1,22 @@
-lwh-dns-v2
-*.exe
+# Local configuration
+config.php
+.env
+
+# Logs and temporary files
+*.log
+tmp/
+locks/
+Documentacion/
+
+# IDE files
+.vscode/
+.idea/
+.DS_Store
+
+# PHP dependencies
+vendor/
+
+# Scripts de despliegue locales: nunca deben publicarse, llevan datos de
+# nuestra infraestructura (hosts, usuarios) y este repo es publico.
+upload.py
+deploy_*.py

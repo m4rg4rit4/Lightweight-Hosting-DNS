@@ -92,6 +92,11 @@ else
     printf "${GREEN}FQDN configurado como: ${YELLOW}$FULL_FQDN${NC}\n"
 fi
 
+# Public source contains no infrastructure domains. Preserve the private cluster
+# nameservers on upgrades; a standalone install starts with this node's FQDN.
+DNS_NAMESERVERS=$(get_env_var DNS_NAMESERVERS "$ENV_FILE")
+[ -z "$DNS_NAMESERVERS" ] && DNS_NAMESERVERS="$FULL_FQDN"
+
 DEFAULT_EMAIL="admin@${FULL_FQDN#*.}"
 ask_input "3. Email del administrador (avisos de Let's Encrypt) [$DEFAULT_EMAIL]: " "$DEFAULT_EMAIL" "ADMIN_EMAIL"
 ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
@@ -255,6 +260,7 @@ DB_USER=$DB_USER
 DB_PASS=$DB_PASS
 DB_HOST=$DB_HOST
 DB_NAME=$DB_NAME
+DNS_NAMESERVERS=$DNS_NAMESERVERS
 # TLS gestionado por el propio binario (Let's Encrypt vía autocert): sin Apache ni certbot.
 # El binario escucha :80 (reto ACME + redirección), :8080 (redirección) y :8090 (API HTTPS).
 TLS_AUTOCERT=1

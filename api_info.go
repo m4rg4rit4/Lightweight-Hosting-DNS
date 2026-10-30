@@ -8,8 +8,8 @@ import (
 	"log"
 	"net/http"
 	"sort"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -78,7 +78,7 @@ func (api *API) HandleGetZones(w http.ResponseWriter, r *http.Request) {
 	// listing is the token scope, added below as a separate condition.
 	serverFilter := strings.TrimSpace(r.URL.Query().Get("server"))
 
-	query := "SELECT id, domain, created_at, updated_at, server_slug FROM sys_dns_zones"
+	query := "SELECT id, domain, created_at, updated_at, server_slug, assignment_revision FROM sys_dns_zones"
 	var conds []string
 	var args []interface{}
 	switch serverFilter {
@@ -117,13 +117,15 @@ func (api *API) HandleGetZones(w http.ResponseWriter, r *http.Request) {
 		var id int
 		var domain, created, updated string
 		var serverSlug sql.NullString
-		rows.Scan(&id, &domain, &created, &updated, &serverSlug)
+		var assignmentRevision uint64
+		rows.Scan(&id, &domain, &created, &updated, &serverSlug, &assignmentRevision)
 		zone := map[string]interface{}{
-			"id": id,
-			"domain": domain,
-			"created_at": created,
-			"updated_at": updated,
-			"server_slug": serverSlug.String,
+			"id":                  id,
+			"domain":              domain,
+			"created_at":          created,
+			"updated_at":          updated,
+			"server_slug":         serverSlug.String,
+			"assignment_revision": assignmentRevision,
 			// For simplicity, omitting full checkDomainDelegation here.
 			"delegated": true,
 		}
@@ -141,7 +143,7 @@ func (api *API) HandleGetZones(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Zones retrieved",
-		"zones": zones,
+		"zones":   zones,
 		// Slugs currently in use, so the panel can build its selector without a
 		// catalogue table and without a second request.
 		"servers": api.serverSlugsInUse(),
@@ -187,7 +189,7 @@ func (api *API) HandleGetRecords(w http.ResponseWriter, r *http.Request) {
 		JOIN sys_dns_zones z ON r.zone_id = z.id 
 		WHERE z.domain = ?
 		ORDER BY r.sort_order ASC, r.id ASC`, domain)
-		
+
 	if err != nil {
 		http.Error(w, `{"success":false,"message":"DB Error"}`, http.StatusInternalServerError)
 		return
@@ -220,7 +222,7 @@ func (api *API) HandleGetRecords(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Records retrieved",
-		"domain": domain,
+		"domain":  domain,
 		"records": records,
 	})
 }

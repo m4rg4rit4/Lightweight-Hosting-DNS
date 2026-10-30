@@ -73,7 +73,7 @@ func (api *API) HandleDdnsUpdate(w http.ResponseWriter, r *http.Request) {
 
 	var cID, cZoneId int
 	var cStatus, cRecordName, cLastIp, cDomain string
-	err := api.DB.QueryRow(`SELECT c.id, c.status, c.zone_id, c.record_name, c.last_ip, z.domain 
+	err := api.DB.QueryRow(`SELECT c.id, c.status, COALESCE(c.zone_id, 0), COALESCE(c.record_name, ''), COALESCE(c.last_ip, ''), COALESCE(z.domain, '') 
 		FROM sys_ddns_clients c LEFT JOIN sys_dns_zones z ON c.zone_id = z.id WHERE c.token = ?`, token).
 		Scan(&cID, &cStatus, &cZoneId, &cRecordName, &cLastIp, &cDomain)
 	
@@ -91,14 +91,16 @@ func (api *API) HandleDdnsUpdate(w http.ResponseWriter, r *http.Request) {
 
 	api.DB.Exec("UPDATE sys_ddns_clients SET last_seen = NOW() WHERE id = ?", cID)
 
-	if cLastIp == ip {
+	var rID int
+	var curContent string
+	err = api.DB.QueryRow("SELECT id, content FROM sys_dns_records WHERE zone_id = ? AND name = ? AND type = 'A'", cZoneId, cRecordName).Scan(&rID, &curContent)
+
+	if cLastIp == ip && err == nil && curContent == ip {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "ip": ip, "updated": false, "message": "IP has not changed"})
 		return
 	}
 
-	var rID int
-	err = api.DB.QueryRow("SELECT id FROM sys_dns_records WHERE zone_id = ? AND name = ? AND type = 'A'", cZoneId, cRecordName).Scan(&rID)
 	if err == nil {
 		api.DB.Exec("UPDATE sys_dns_records SET content = ?, ttl = 60 WHERE id = ?", ip, rID)
 	} else {
@@ -107,6 +109,7 @@ func (api *API) HandleDdnsUpdate(w http.ResponseWriter, r *http.Request) {
 
 	api.DB.Exec("UPDATE sys_ddns_clients SET last_ip = ? WHERE id = ?", ip, cID)
 	api.DB.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('add', ?, 'pending')", cDomain)
+	TriggerSync()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "ip": ip, "updated": true, "message": "IP updated successfully"})

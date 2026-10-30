@@ -55,6 +55,9 @@ func initDB(user, pass, host, dbname string) (*sql.DB, error) {
 // fresh installs, and this covers nodes that only get the new binary.
 func migrate(db *sql.DB) {
 	stmts := []string{
+		"ALTER TABLE sys_dns_zones ADD COLUMN IF NOT EXISTS assignment_revision BIGINT UNSIGNED NOT NULL DEFAULT 0",
+		`CREATE TABLE IF NOT EXISTS sys_dns_jobs (job_key CHAR(64) PRIMARY KEY, payload_hash CHAR(64) NOT NULL, request_id INT NULL, applied TINYINT NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`,
+		"ALTER TABLE sys_dns_jobs ADD COLUMN IF NOT EXISTS result_json MEDIUMTEXT NULL",
 		// Requests were claimed with no record of when or how many times, so a row
 		// left in 'processing' by a crash, or moved to 'error' by a transient
 		// named-checkconf failure, was never picked up again.
