@@ -131,3 +131,9 @@ Actualizar primero el binario Go en todos los DNS y después Hosting. Las migrac
 Validación: `go test ./...` y `go vet ./...`. Las pruebas cubren reintentos, rollback, reclamaciones simultáneas, liberación y réplicas retrasadas.
 
 Los nombres de los servidores DNS se reciben en el campo `nameservers` de la API o en `DNS_NAMESERVERS` del EnvironmentFile privado. Hosting los obtiene de los nodos configurados en su base de datos y envía la misma lista a todos. No guardar dominios reales, credenciales ni archivos de despliegue en el repositorio.
+
+## Integridad del alta de zonas (2.2.2)
+
+El alta guarda en una transacción la zona, los NS, un único SOA y la petición de publicación. Si se indica IP, añade A o AAAA según corresponda y un CNAME `www` al dominio completo. Un fallo al insertar el SOA u otro registro revierte el alta completa.
+
+Antes de generar una zona, el motor persiste los NS o SOA esenciales que falten. Para un SOA antiguo conserva los valores del archivo de zona cuando están disponibles. El serial aumenta también en SOA importados que lleven un serial numérico fijo.

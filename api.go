@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -58,58 +59,98 @@ func (api *API) HandleAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if exists
+	req.Domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(req.Domain), "."))
+	if !validZoneName(req.Domain) {
+		http.Error(w, `{"message":"Invalid domain"}`, 400)
+		return
+	}
 	nameservers, nsErr := resolveNameservers(req.Nameservers)
 	if nsErr != nil {
-		http.Error(w, `{"message":"Configure DNS_NAMESERVERS or provide valid nameservers"}`, http.StatusServiceUnavailable)
+		http.Error(w, `{"message":"Configure DNS_NAMESERVERS or provide valid nameservers"}`, 503)
 		return
+	}
+	req.IP = strings.TrimSpace(req.IP)
+	addressType := "A"
+	if req.IP != "" {
+		ip := net.ParseIP(req.IP)
+		if ip == nil {
+			http.Error(w, `{"message":"Invalid IP address"}`, 400)
+			return
+		}
+		if ip.To4() == nil {
+			addressType = "AAAA"
+		}
+		req.IP = ip.String()
+	}
+	store := api.DB
+	var tx *sql.Tx
+	if db, ok := api.DB.(*sql.DB); ok {
+		var err error
+		tx, err = db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, `{"message":"Database unavailable"}`, 503)
+			return
+		}
+		defer tx.Rollback()
+		store = tx
 	}
 	var id int
-	err := api.DB.QueryRow("SELECT id FROM sys_dns_zones WHERE domain = ?", req.Domain).Scan(&id)
+	err := store.QueryRow("SELECT id FROM sys_dns_zones WHERE domain = ?", req.Domain).Scan(&id)
 	if err == nil {
-		http.Error(w, `{"success":false,"message":"Domain already exists"}`, http.StatusBadRequest)
+		http.Error(w, `{"message":"Domain already exists"}`, 409)
 		return
 	}
-
-	zoneFile := "/etc/bind/zones/db." + req.Domain
-
-	var serverSlug interface{}
-	if s := strings.TrimSpace(req.Server); s != "" {
-		serverSlug = s
-	}
-
-	res, err := api.DB.Exec("INSERT INTO sys_dns_zones (domain, zone_file_path, is_active, server_slug) VALUES (?, ?, 1, ?)", req.Domain, zoneFile, serverSlug)
-	if err != nil {
-		http.Error(w, `{"success":false,"message":"DB Error"}`, http.StatusInternalServerError)
+	if err != sql.ErrNoRows {
+		http.Error(w, `{"message":"Domain lookup failed"}`, 503)
 		return
 	}
-	zoneId, _ := res.LastInsertId()
-
-	adminEmail := "admin." + req.Domain
-
-	// Insert base records: valid authoritative nameservers
-	for _, nameserver := range nameservers {
-		api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'NS', ?)", zoneId, nameserver)
+	if err = insertZone(store, req, nameservers, addressType); err != nil {
+		http.Error(w, `{"message":"Zone creation failed; no partial zone was saved"}`, 503)
+		return
 	}
-
-	if req.IP != "" {
-		api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'A', ?)", zoneId, req.IP)
-		api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, 'www', 'CNAME', ?)", zoneId, "@")
+	if tx != nil {
+		if err = tx.Commit(); err != nil {
+			http.Error(w, `{"message":"Zone commit failed"}`, 503)
+			return
+		}
 	}
-
-	soaContent := fmt.Sprintf("%s %s. ( {SERIAL} 3600 1800 604800 86400 )", nameservers[0], adminEmail)
-	api.DB.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'SOA', ?)", zoneId, soaContent)
-
-	// Queue update and trigger immediate sync
-	api.DB.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('add', ?, 'pending')", req.Domain)
 	TriggerSync()
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Domain added successfully",
-		"domain":  req.Domain,
-	})
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "Zone created and publication queued", "domain": req.Domain})
+}
+
+func insertZone(store dnsDB, req AddRequest, nameservers []string, addressType string) error {
+	var owner interface{}
+	if s := normalizeSlug(req.Server); s != "" {
+		owner = s
+	}
+	result, err := store.Exec("INSERT INTO sys_dns_zones (domain, zone_file_path, is_active, server_slug) VALUES (?, ?, 1, ?)", req.Domain, zonesDir+"/db."+req.Domain, owner)
+	if err != nil {
+		return err
+	}
+	zoneID, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	for _, ns := range nameservers {
+		if _, err = store.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'NS', ?)", zoneID, ns); err != nil {
+			return err
+		}
+	}
+	if req.IP != "" {
+		if _, err = store.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', ?, ?)", zoneID, addressType, req.IP); err != nil {
+			return err
+		}
+		if _, err = store.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, 'www', 'CNAME', ?)", zoneID, req.Domain+"."); err != nil {
+			return err
+		}
+	}
+	soa := fmt.Sprintf("%s admin.%s. ( {SERIAL} 3600 1800 604800 86400 )", nameservers[0], req.Domain)
+	if _, err = store.Exec("INSERT INTO sys_dns_records (zone_id, name, type, content) VALUES (?, '@', 'SOA', ?)", zoneID, soa); err != nil {
+		return err
+	}
+	_, err = store.Exec("INSERT INTO sys_dns_requests (action, domain, status) VALUES ('add', ?, 'pending')", req.Domain)
+	return err
 }
 
 func (api *API) HandleRecordAdd(w http.ResponseWriter, r *http.Request) {

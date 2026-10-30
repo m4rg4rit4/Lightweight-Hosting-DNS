@@ -15,14 +15,19 @@ import (
 // Transactional driver double to exercise receipts and rollback through the real
 // HTTP handler. No MySQL or running BIND instance is needed.
 type jobState struct {
-	hash      string
-	applied   bool
-	mutations int64
-	status    string
-	fail      bool
-	owner     string
-	revision  int64
-	result    string
+	hash           string
+	applied        bool
+	mutations      int64
+	status         string
+	fail           bool
+	owner          string
+	revision       int64
+	result         string
+	newZone        bool
+	failRecordType string
+	recordTypes    string
+	soaContent     string
+	wwwTarget      string
 }
 type jobConnector struct {
 	state *jobState
@@ -84,7 +89,30 @@ func (c *jobConn) ExecContext(_ context.Context, q string, args []driver.NamedVa
 			s.hash = args[1].Value.(string)
 		}
 	case strings.HasPrefix(q, "INSERT INTO sys_dns_records"):
+		kind := ""
+		for _, candidate := range []string{"NS", "SOA", "CNAME"} {
+			if strings.Contains(q, "'"+candidate+"'") {
+				kind = candidate
+			}
+		}
+		if strings.Contains(q, "VALUES (?, '@', ?, ?)") {
+			kind = args[1].Value.(string)
+		}
+		if kind == s.failRecordType && kind != "" {
+			return nil, errors.New("simulated record failure")
+		}
+		if kind != "" {
+			s.recordTypes += kind + ","
+		}
+		if kind == "SOA" {
+			s.soaContent = args[1].Value.(string)
+		}
+		if kind == "CNAME" {
+			s.wwwTarget = args[1].Value.(string)
+		}
 		s.mutations++
+	case strings.HasPrefix(q, "INSERT INTO sys_dns_zones"):
+		s.newZone = false
 	case strings.HasPrefix(q, "DELETE FROM sys_dns_records"):
 		s.mutations = 0
 	case strings.HasPrefix(q, "UPDATE sys_dns_zones"):
@@ -135,6 +163,9 @@ func (c *jobConn) QueryContext(_ context.Context, q string, _ []driver.NamedValu
 		}
 		values = []driver.Value{s.hash, id, s.applied, s.result}
 	case strings.Contains(q, "FROM sys_dns_zones"):
+		if s.newZone {
+			return &jobRows{values: []driver.Value{int64(1)}, done: true}, nil
+		}
 		if strings.Contains(q, "SELECT server_slug, assignment_revision") {
 			values = []driver.Value{s.owner, s.revision}
 		} else {

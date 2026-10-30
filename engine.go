@@ -140,13 +140,16 @@ func processRequests(db *sql.DB) {
 		} else { // add or update
 			var zoneID int
 			err := db.QueryRow("SELECT id FROM sys_dns_zones WHERE domain = ?", req.Domain).Scan(&zoneID)
-			if err == sql.ErrNoRows {
-				res, _ := db.Exec("INSERT INTO sys_dns_zones (domain, zone_file_path, is_active) VALUES (?, ?, 1)", req.Domain, zoneFilePath)
-				zid, _ := res.LastInsertId()
-				zoneID = int(zid)
+			if err != nil {
+				db.Exec("UPDATE sys_dns_requests SET status = 'error', error_log = ?, processed_date = NOW() WHERE id = ?", "Zone lookup failed: "+err.Error(), req.ID)
+				continue
 			}
 
 			// Generate zone file with guaranteed increasing serial
+			if err := ensureZoneEssentials(db, zoneID, req.Domain); err != nil {
+				db.Exec("UPDATE sys_dns_requests SET status = 'error', error_log = ?, processed_date = NOW() WHERE id = ?", err.Error(), req.ID)
+				continue
+			}
 			oldSerialStr := readZoneSerial(zoneFilePath)
 			serial := computeNextSerial(oldSerialStr)
 
@@ -154,7 +157,11 @@ func processRequests(db *sql.DB) {
 				db.Exec("UPDATE sys_dns_requests SET status = 'error', error_log = ?, processed_date = NOW() WHERE id = ?", err.Error(), req.ID)
 				continue
 			}
-			addedToConf := addToAutoConf(req.Domain, zoneFilePath)
+			addedToConf, confErr := addToAutoConf(req.Domain, zoneFilePath)
+			if confErr != nil {
+				db.Exec("UPDATE sys_dns_requests SET status = 'error', error_log = ?, processed_date = NOW() WHERE id = ?", confErr.Error(), req.ID)
+				continue
+			}
 			if addedToConf {
 				newZonesAdded = true
 			}
@@ -328,15 +335,21 @@ func buildZoneFile(db dnsDB, zoneID int, domain, serial string) (string, error) 
 	var records []DNSRecord
 	for rows.Next() {
 		var r DNSRecord
-		rows.Scan(&r.Name, &r.Type, &r.Content, &r.TTL, &r.Priority)
+		if err := rows.Scan(&r.Name, &r.Type, &r.Content, &r.TTL, &r.Priority); err != nil {
+			return "", err
+		}
 		records = append(records, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", err
 	}
 
 	// SOA handling
 	hasSOA := false
 	for _, r := range records {
 		if r.Type == "SOA" {
-			soaContent := strings.Replace(r.Content, "{SERIAL}", serial, 1)
+			soaContent := soaWithSerial(r.Content, serial)
 			sb.WriteString(fmt.Sprintf("@\tIN\tSOA\t%s\n", soaContent))
 			hasSOA = true
 			break
@@ -395,18 +408,29 @@ func buildZoneFile(db dnsDB, zoneID int, domain, serial string) (string, error) 
 
 // addToAutoConf reports whether it actually appended a new zone block, so the caller
 // can undo exactly what it added if named-checkconf then rejects the config.
-func addToAutoConf(domain, path string) bool {
-	b, _ := os.ReadFile(autoZonesConf)
+func addToAutoConf(domain, path string) (bool, error) {
+	b, err := os.ReadFile(autoZonesConf)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
 	content := string(b)
 	target := fmt.Sprintf("zone \"%s\"", domain)
 	if strings.Contains(content, target) {
-		return false
+		return false, nil
 	}
 	appendStr := fmt.Sprintf("zone \"%s\" {\n\ttype master;\n\tfile \"%s\";\n};\n", domain, path)
-	f, _ := os.OpenFile(autoZonesConf, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer f.Close()
-	f.WriteString(appendStr)
-	return true
+	f, err := os.OpenFile(autoZonesConf, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return false, err
+	}
+	if _, err = f.WriteString(appendStr); err != nil {
+		f.Close()
+		return false, err
+	}
+	if err = f.Close(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func removeFromAutoConf(domain string) {
