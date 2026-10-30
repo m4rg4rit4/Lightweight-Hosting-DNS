@@ -137,3 +137,15 @@ Los nombres de los servidores DNS se reciben en el campo `nameservers` de la API
 El alta guarda en una transacción la zona, los NS, un único SOA y la petición de publicación. Si se indica IP, añade A o AAAA según corresponda y un CNAME `www` al dominio completo. Un fallo al insertar el SOA u otro registro revierte el alta completa.
 
 Antes de generar una zona, el motor persiste los NS o SOA esenciales que falten. Para un SOA antiguo conserva los valores del archivo de zona cuando están disponibles. El serial aumenta también en SOA importados que lleven un serial numérico fijo.
+
+## Actualización del nodo (2.2.3)
+
+La versión instalada la informa el propio binario con `lwh-dns-v2 --version`, sin conectarse a la base de datos ni arrancar el servicio. `/etc/lwh-dns/VERSION` conserva el mismo valor como metadato. La constante de un `config.php` antiguo no participa en la comparación de versiones DNS.
+
+El cron usa `/usr/local/bin/lwh-dns-autoupdate`. Si el repositorio no ofrece una versión posterior, termina sin reinstalar ni reiniciar. Una versión nueva necesita un release `vX.Y.Z` con `lwh-dns-linux-amd64` o `lwh-dns-linux-arm64` y el archivo de checksum correspondiente con sufijo `.sha256`. Si faltan los artefactos o no coinciden checksum/versión, conserva el servicio existente.
+
+`install.sh /update --binary /ruta/al/binario --target-version X.Y.Z` sustituye únicamente el ejecutable, verifica el servicio y registra la versión después del éxito. Si falla, restaura el ejecutable anterior. Esta ruta termina antes de APT, SQL de aprovisionamiento, firewall, hostname, generación de unidades o escritura de `lwh-dns.env`. El actualizador usa una copia local de este instalador protegido, sin descargar y ejecutar `main/install.sh` desde cron.
+
+La instalación inicial conserva un EnvironmentFile existente; su regeneración requiere `/config`. La actualización de paquetes del sistema queda separada de la actualización de la aplicación. No se ejecuta `apt upgrade` desde el instalador DNS.
+
+Para verificar sin aplicar cambios: `sudo /usr/local/bin/lwh-dns-autoupdate --check`. Las pruebas aisladas Linux (`sudo bash tests/update_test.sh`) simulan servicios y descargas para comprobar convergencia, checksum, ausencia de aprovisionamiento y rollback.

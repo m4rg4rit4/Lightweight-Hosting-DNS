@@ -16,11 +16,79 @@ GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
 UPDATE_MODE=false
 if [[ " $* " == *" /update "* ]] || [[ " $* " == *" /silent "* ]]; then
     UPDATE_MODE=true
-    printf "${YELLOW}>>> MODO ACTUALIZACIÓN/SILENCIOSO: instalación no interactiva.${NC}\n"
+    printf "${YELLOW}>>> ACTUALIZACIÓN DEL BINARIO GO: configuración privada conservada.${NC}\n"
 fi
 [[ " $* " == *" /config "* ]] && UPDATE_MODE=false
 
-VERSION=$( [ -f VERSION ] && cat VERSION || echo "2.3.0" )
+REPO_RAW=${LWH_DNS_REPO_RAW:-https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting-DNS/main}
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-.}")" && pwd)
+VERSION=""
+TARGET_VERSION=""
+STAGED_BINARY=""
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+    case "${args[i]}" in
+        --target-version) i=$((i+1)); TARGET_VERSION=${args[i]:-};;
+        --binary) i=$((i+1)); STAGED_BINARY=${args[i]:-};;
+    esac
+done
+if [ -n "$TARGET_VERSION" ]; then
+    VERSION=$TARGET_VERSION
+elif [ -f "$SCRIPT_DIR/VERSION" ]; then
+    VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")
+else
+    VERSION=$(curl -fsSL --connect-timeout 5 --max-time 30 "$REPO_RAW/VERSION" | tr -d '[:space:]')
+fi
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'No valid target version; installation aborted.' >&2; exit 1; }
+
+update_binary() (
+    set -euo pipefail
+    [ "$EUID" -eq 0 ] || { echo 'Run as root.' >&2; exit 1; }
+    local bin=${LWH_DNS_BIN:-/usr/local/bin/lwh-dns-v2}
+    local version_file=${LWH_DNS_VERSION_FILE:-/etc/lwh-dns/VERSION}
+    exec 8>"${LWH_DNS_UPDATE_LOCK:-/run/lwh-dns-update.lock}"
+    flock -n 8 || { echo 'An update is already running.' >&2; exit 1; }
+    local installed
+    installed=$(timeout 5 "$bin" --version)
+    [[ "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Installed binary does not report a valid version.' >&2; exit 1; }
+    if [ "$installed" = "$VERSION" ]; then
+        if [ ! -f "$version_file" ] || [ "$(cat "$version_file")" != "$installed" ]; then
+            mkdir -p "$(dirname "$version_file")"
+            printf '%s\n' "$installed" > "$version_file.new"
+            chmod 600 "$version_file.new"; mv "$version_file.new" "$version_file"
+        fi
+        echo 'Already current; no service or configuration changes.'
+        exit 0
+    fi
+    [[ "$(printf '%s\n' "$installed" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ]] || { echo 'Refusing to downgrade.' >&2; exit 1; }
+    [ -n "$STAGED_BINARY" ] && [ -x "$STAGED_BINARY" ] || { echo 'Provide a verified release binary with --binary. Full reinstallation is disabled in update mode.' >&2; exit 1; }
+    [ "$(timeout 5 "$STAGED_BINARY" --version)" = "$VERSION" ] || { echo 'Staged binary version mismatch.' >&2; exit 1; }
+    local backup="${bin}.before-update-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    cp -p "$bin" "$backup"
+    install -m 755 "$STAGED_BINARY" "$bin.new"
+    mv "$bin.new" "$bin"
+    local healthy=true
+    systemctl restart lwh-dns || healthy=false
+    for check in 1 2 3; do
+        sleep 1
+        systemctl is-active --quiet lwh-dns || healthy=false
+    done
+    [ "$(timeout 5 "$bin" --version)" = "$VERSION" ] || healthy=false
+    if [ "$healthy" != true ]; then
+        cp -p "$backup" "$bin.rollback"; mv "$bin.rollback" "$bin"
+        systemctl restart lwh-dns
+        echo 'Update failed; previous binary restored and version marker unchanged.' >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$version_file")"
+    printf '%s\n' "$VERSION" > "$version_file.new"
+    chmod 600 "$version_file.new"; mv "$version_file.new" "$version_file"
+    echo "DNS binary updated to $VERSION; private configuration preserved."
+)
+
+# Stop here: this path must never reach APT, SQL provisioning, firewall, hostname,
+# EnvironmentFile or systemd-unit generation from the initial installer.
+if [ "$UPDATE_MODE" = true ]; then update_binary; exit $?; fi
 printf "${GREEN}Instalación del nodo DNS Lightweight (v$VERSION) — Go + autocert${NC}\n"
 
 sanitize_var() { echo "$1" | tr -d '[:space:]\r\n' | sed -E 's|^//.*||; s|^#.*||'; }
@@ -114,7 +182,6 @@ fi
 # ---------------------------------------------------------------------------
 printf "${YELLOW}Instalando dependencias...${NC}\n"
 apt update -y
-[ "$UPDATE_MODE" = true ] && apt upgrade -y
 apt install -y curl dnsutils ufw bind9 bind9utils
 
 # 3.1 MariaDB con perfil de bajo consumo
@@ -254,6 +321,7 @@ chmod +x "$BIN_DEST"; chown root:root "$BIN_DEST"
 # ---------------------------------------------------------------------------
 printf "${YELLOW}Escribiendo $ENV_FILE...${NC}\n"
 mkdir -p /etc/lwh-dns && chmod 700 /etc/lwh-dns
+if [ ! -f "$ENV_FILE" ] || [[ " $* " == *" /config "* ]]; then
 cat > "$ENV_FILE" <<EOF
 # Credenciales de la base de datos del nodo DNS (rota aquí la contraseña).
 DB_USER=$DB_USER
@@ -267,6 +335,9 @@ TLS_AUTOCERT=1
 TLS_HOSTS=$FULL_FQDN
 TLS_CACHE_DIR=$CACHE_DIR
 EOF
+else
+    printf "${GREEN}EnvironmentFile existente conservado sin cambios.${NC}\n"
+fi
 chmod 600 "$ENV_FILE"
 mkdir -p "$CACHE_DIR" && chmod 700 "$CACHE_DIR"
 
@@ -312,6 +383,42 @@ systemctl restart bind9 2>/dev/null || systemctl restart named 2>/dev/null || tr
 # ---------------------------------------------------------------------------
 # 10. Aviso sobre la emisión del certificado
 # ---------------------------------------------------------------------------
+ACTUAL_VERSION=$(timeout 5 "$BIN_DEST" --version)
+[ "$ACTUAL_VERSION" = "$VERSION" ] || { echo 'The installed binary does not match VERSION.' >&2; exit 1; }
+printf '%s\n' "$ACTUAL_VERSION" > /etc/lwh-dns/VERSION.new
+chmod 600 /etc/lwh-dns/VERSION.new
+mv /etc/lwh-dns/VERSION.new /etc/lwh-dns/VERSION
+
+# Dedicated Go updater; the old PHP updater must not control DNS versions.
+UPDATER_TEMP=$(mktemp)
+if [ -f "$SCRIPT_DIR/autoupdate.sh" ]; then
+    cp "$SCRIPT_DIR/autoupdate.sh" "$UPDATER_TEMP"
+else
+    curl -fsSL --max-time 30 "$REPO_RAW/autoupdate.sh" -o "$UPDATER_TEMP" || exit 1
+fi
+bash -n "$UPDATER_TEMP" || exit 1
+install -m 755 "$UPDATER_TEMP" /usr/local/bin/lwh-dns-autoupdate
+rm -f "$UPDATER_TEMP"
+mkdir -p /usr/local/lib/lwh-dns
+LOCAL_INSTALLER_TEMP=$(mktemp)
+if [ -f "${BASH_SOURCE[0]:-}" ]; then
+    cp "${BASH_SOURCE[0]}" "$LOCAL_INSTALLER_TEMP"
+else
+    curl -fsSL --max-time 30 "$REPO_RAW/install.sh" -o "$LOCAL_INSTALLER_TEMP" || exit 1
+fi
+bash -n "$LOCAL_INSTALLER_TEMP" || exit 1
+grep -q '^update_binary()' "$LOCAL_INSTALLER_TEMP" || { echo 'Guarded installer unavailable.' >&2; exit 1; }
+install -m 755 "$LOCAL_INSTALLER_TEMP" /usr/local/lib/lwh-dns/install.sh
+rm -f "$LOCAL_INSTALLER_TEMP"
+OLD_DNS_UPDATER=false
+if grep -q 'Lightweight-Hosting-DNS/main' /usr/local/bin/hosting/autoupdate.sh 2>/dev/null; then OLD_DNS_UPDATER=true; fi
+(crontab -l 2>/dev/null || true) | awk -v old="$OLD_DNS_UPDATER" '
+    index($0,"/usr/local/bin/lwh-dns-autoupdate")==0 && !(old=="true" && index($0,"/usr/local/bin/hosting/autoupdate.sh"))
+' > /etc/lwh-dns/crontab.new
+printf '%s\n' '0 3 * * * /bin/bash /usr/local/bin/lwh-dns-autoupdate >> /var/log/dns_autoupdate.log 2>&1' >> /etc/lwh-dns/crontab.new
+crontab /etc/lwh-dns/crontab.new
+rm -f /etc/lwh-dns/crontab.new
+
 PUBLIC_IP=$(curl -s https://api.ipify.org 2>/dev/null)
 FQDN_IP=$(dig @8.8.8.8 +short "$FULL_FQDN" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1)
 if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "$FQDN_IP" ]; then

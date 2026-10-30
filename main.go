@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -72,6 +73,10 @@ func (api *API) registerRoutes(mux *http.ServeMux) {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(currentVersion())
+		return
+	}
 	cfg, err := loadDBConfig()
 	if err != nil {
 		log.Fatalf("Config error: %v", err)
